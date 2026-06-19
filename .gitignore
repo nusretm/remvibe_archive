@@ -2,6 +2,9 @@
 # Created by `dart pub`
 .dart_tool/
 
+
+test_exctract/
+
 # Ignore all exe files
 bin/*.exe
 
