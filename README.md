@@ -45,6 +45,7 @@ scrypt and a random salt; there is no default key.
 final archive = await RemvibeArchive.open(
   'update.nta',
   // passphrase: required only for an encrypted archive
+  readPolicy: ArchiveReadPolicy.strict,
 );
 
 final result = await archive.extract(
@@ -58,10 +59,18 @@ validated in a sibling staging directory and renamed into place only after all
 entries, SHA-256 digests, limits, and critical metadata succeed. Non-critical
 metadata failures are returned in `result.warnings`.
 
+Archive paths that differ by case or Unicode normalization are preserved in the
+container. Before extraction, the library probes the actual target filesystem
+and rejects any names that the target aliases; it never silently overwrites one
+entry with another. The strict policy also rejects setuid/setgid permissions.
+
 ## Security boundary
 
 Encryption protects archive confidentiality and authenticates the encrypted
-container. SHA-256 detects per-file corruption. Neither mechanism establishes
+container. Encrypted bodies are authenticated and streamed without writing a
+complete plaintext body to temporary storage. `ArchiveReadPolicy` bounds stored
+body and manifest processing before those bytes are consumed. SHA-256 detects
+per-file corruption. Neither mechanism establishes
 publisher identity: software updates still require separately signed trusted
 release metadata or a digital signature.
 

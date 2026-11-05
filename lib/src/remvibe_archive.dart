@@ -35,11 +35,13 @@ class RemvibeArchive {
     required String? passphrase,
     required _ContainerHeader containerHeader,
     required List<StoredEntry> storedEntries,
+    required ArchiveReadPolicy readPolicy,
   })  : _encryption = encryption,
         _compression = ArchiveCompression.zlib,
         _passphrase = passphrase,
         _isBuilder = false,
         _containerHeader = containerHeader,
+        _readPolicy = readPolicy,
         _storedEntries = storedEntries;
 
   factory RemvibeArchive.create({
@@ -72,11 +74,11 @@ class RemvibeArchive {
   static Future<RemvibeArchive> open(
     String archivePath, {
     String? passphrase,
+    ArchiveReadPolicy readPolicy = ArchiveReadPolicy.strict,
   }) async {
-    _ContainerHeader? header;
-    Directory? temporaryDirectory;
     try {
-      header = await _readContainerHeader(archivePath);
+      _validateReadPolicy(readPolicy);
+      final header = await _readContainerHeader(archivePath, readPolicy);
       if (header.encryption == ArchiveEncryption.aes256Gcm &&
           (passphrase == null || passphrase.isEmpty)) {
         throw const ArchiveException(
@@ -84,21 +86,19 @@ class RemvibeArchive {
           'This archive is encrypted and requires a passphrase.',
         );
       }
-      temporaryDirectory = await Directory.systemTemp.createTemp('nta-open-');
-      final bodyFile = File(p.join(temporaryDirectory.path, 'body.bin'));
-      await _materializeBody(
+      final parsed = await _readArchiveManifest(
         archivePath: archivePath,
         header: header,
         passphrase: passphrase,
-        output: bodyFile,
+        readPolicy: readPolicy,
       );
-      final parsed = await _readManifest(bodyFile);
       return RemvibeArchive._open(
         path: archivePath,
         encryption: header.encryption,
         passphrase: passphrase,
         containerHeader: header,
         storedEntries: parsed.entries,
+        readPolicy: readPolicy,
       );
     } on ArchiveException {
       rethrow;
@@ -108,10 +108,6 @@ class RemvibeArchive {
         'Could not open archive $archivePath.',
         error,
       );
-    } finally {
-      if (temporaryDirectory != null && await temporaryDirectory.exists()) {
-        await temporaryDirectory.delete(recursive: true);
-      }
     }
   }
 
@@ -121,6 +117,7 @@ class RemvibeArchive {
   final String? _passphrase;
   final bool _isBuilder;
   final _ContainerHeader? _containerHeader;
+  ArchiveReadPolicy _readPolicy = ArchiveReadPolicy.strict;
   final List<_SourceSpec> _sources = [];
   List<StoredEntry> _storedEntries = [];
 
@@ -299,22 +296,21 @@ class RemvibeArchive {
     final staging = Directory(
       p.join(parent.path, '.${p.basename(destinationDirectory.path)}.nta-staging-${_randomSuffix()}'),
     );
-    final body = File(
-      p.join(parent.path, '.${p.basename(destinationDirectory.path)}.nta-body-${_randomSuffix()}'),
-    );
     final warnings = <String>[];
     var committed = false;
     try {
       await staging.create();
-      await _materializeBody(
+      final currentHeader = await _readContainerHeader(path, _readPolicy);
+      _ensureSameContainerHeader(_containerHeader, currentHeader);
+      final parsed = await _readArchiveManifest(
         archivePath: path,
-        header: _containerHeader,
+        header: currentHeader,
         passphrase: _passphrase,
-        output: body,
+        readPolicy: _readPolicy,
       );
-      final parsed = await _readManifest(body);
       _validateExtractionLimits(parsed.entries, policy);
       _validateCriticalMetadata(parsed.entries);
+      await _validateTargetFilesystemPaths(staging, parsed.entries);
 
       final directories = parsed.entries
           .where((stored) => stored.entry.type == ArchiveEntryType.directory)
@@ -325,27 +321,41 @@ class RemvibeArchive {
         await Directory(_targetPath(staging.path, stored.entry.path)).create();
       }
 
-      final bodyHandle = await body.open();
-      try {
-        for (final stored in parsed.entries.where(
-          (stored) => stored.entry.type == ArchiveEntryType.file,
-        )) {
-          await _extractFile(
-            bodyHandle: bodyHandle,
-            payloadStart: parsed.payloadStart,
-            stored: stored,
-            stagingPath: staging.path,
-            policy: policy,
-          );
-          await _applyMetadata(
-            stored.entry,
-            _targetPath(staging.path, stored.entry.path),
-            policy,
-            warnings,
-          );
+      final files = parsed.entries
+          .where((stored) => stored.entry.type == ArchiveEntryType.file)
+          .toList();
+      if (_encryption == ArchiveEncryption.none) {
+        final archiveHandle = await File(path).open();
+        try {
+          for (final stored in files) {
+            await _extractFile(
+              bodyHandle: archiveHandle,
+              payloadStart: currentHeader.bodyOffset + parsed.payloadStart,
+              stored: stored,
+              stagingPath: staging.path,
+              policy: policy,
+            );
+          }
+        } finally {
+          await archiveHandle.close();
         }
-      } finally {
-        await bodyHandle.close();
+      } else {
+        await _extractEncryptedFiles(
+          archivePath: path,
+          header: currentHeader,
+          passphrase: _passphrase!,
+          parsed: parsed,
+          stagingPath: staging.path,
+          policy: policy,
+        );
+      }
+      for (final stored in files) {
+        await _applyMetadata(
+          stored.entry,
+          _targetPath(staging.path, stored.entry.path),
+          policy,
+          warnings,
+        );
       }
 
       for (final stored in parsed.entries.where(
@@ -402,7 +412,6 @@ class RemvibeArchive {
       if (!committed && await staging.exists()) {
         await staging.delete(recursive: true);
       }
-      if (await body.exists()) await body.delete();
     }
   }
 
@@ -522,7 +531,6 @@ class RemvibeArchive {
 
   void _validatePendingEntries(List<_PendingEntry> entries) {
     final paths = <String, _PendingEntry>{};
-    final foldedPaths = <String, String>{};
     for (final entry in entries) {
       final existing = paths[entry.archivePath];
       if (existing != null) {
@@ -531,16 +539,7 @@ class RemvibeArchive {
           'Duplicate archive path: ${entry.archivePath}',
         );
       }
-      final folded = entry.archivePath.toLowerCase();
-      final caseCollision = foldedPaths[folded];
-      if (caseCollision != null) {
-        throw ArchiveException(
-          ArchiveErrorCode.duplicateEntry,
-          'Case-insensitive path collision: $caseCollision and ${entry.archivePath}',
-        );
-      }
       paths[entry.archivePath] = entry;
-      foldedPaths[folded] = entry.archivePath;
     }
     _validateParentEntries(
       paths.map((key, value) => MapEntry(key, value.type)),
@@ -752,7 +751,10 @@ class RemvibeArchive {
   }
 }
 
-Future<_ContainerHeader> _readContainerHeader(String archivePath) async {
+Future<_ContainerHeader> _readContainerHeader(
+  String archivePath,
+  ArchiveReadPolicy readPolicy,
+) async {
   final file = File(archivePath);
   if (!await file.exists()) {
     throw ArchiveException(
@@ -771,6 +773,12 @@ Future<_ContainerHeader> _readContainerHeader(String archivePath) async {
     }
     final preambleBytes = await _readExact(handle, preambleLength);
     final preamble = parsePreamble(preambleBytes);
+    if (preamble.bodyLength > readPolicy.maxStoredBodyBytes) {
+      throw ArchiveException(
+        ArchiveErrorCode.resourceLimitExceeded,
+        'The stored archive body exceeds the configured read limit.',
+      );
+    }
     final expectedLength =
         preambleLength + preamble.publicHeaderLength + preamble.bodyLength;
     if (fileLength != expectedLength) {
@@ -858,38 +866,123 @@ Future<_ContainerHeader> _readContainerHeader(String archivePath) async {
   }
 }
 
-Future<void> _materializeBody({
-  required String archivePath,
-  required _ContainerHeader header,
-  required String? passphrase,
-  required File output,
-}) async {
-  final currentHeader = await _readContainerHeader(archivePath);
-  if (!listEquals(currentHeader.preambleBytes, header.preambleBytes) ||
-      !listEquals(currentHeader.publicHeaderBytes, header.publicHeaderBytes)) {
+void _ensureSameContainerHeader(
+  _ContainerHeader expected,
+  _ContainerHeader current,
+) {
+  if (!listEquals(current.preambleBytes, expected.preambleBytes) ||
+      !listEquals(current.publicHeaderBytes, expected.publicHeaderBytes)) {
     throw const ArchiveException(
       ArchiveErrorCode.invalidArchive,
       'The archive changed after it was opened.',
     );
   }
+}
+
+Future<_ParsedBody> _readArchiveManifest({
+  required String archivePath,
+  required _ContainerHeader header,
+  required String? passphrase,
+  required ArchiveReadPolicy readPolicy,
+}) async {
+  if (header.encryption == ArchiveEncryption.none) {
+    final handle = await File(archivePath).open();
+    try {
+      await handle.setPosition(header.bodyOffset);
+      final manifestLength = readUint64(await _readExact(handle, 8));
+      _validateManifestLength(
+        manifestLength,
+        header.bodyLength,
+        readPolicy,
+      );
+      final manifestBytes = await _readExact(handle, manifestLength);
+      return _parseManifestBytes(
+        manifestBytes,
+        manifestLength: manifestLength,
+        plainBodyLength: header.bodyLength,
+      );
+    } finally {
+      await handle.close();
+    }
+  }
+
+  final plainBodyLength = header.bodyLength - gcmTagLength;
+  final prefix = <int>[];
+  int? manifestLength;
+  await _processEncryptedBody(
+    archivePath: archivePath,
+    header: header,
+    passphrase: passphrase!,
+    onPlaintext: (chunk) async {
+      if (manifestLength != null &&
+          prefix.length >= 8 + manifestLength!) {
+        return;
+      }
+      var offset = 0;
+      if (prefix.length < 8) {
+        final needed = 8 - prefix.length;
+        final count = needed < chunk.length ? needed : chunk.length;
+        prefix.addAll(chunk.sublist(0, count));
+        offset = count;
+        if (prefix.length == 8) {
+          manifestLength = readUint64(Uint8List.fromList(prefix));
+        }
+      }
+      if (manifestLength == null ||
+          manifestLength! > readPolicy.maxManifestBytes ||
+          manifestLength! > maxManifestLength ||
+          manifestLength! > plainBodyLength - 8) {
+        return;
+      }
+      final totalLength = 8 + manifestLength!;
+      final remaining = totalLength - prefix.length;
+      if (remaining > 0 && offset < chunk.length) {
+        final available = chunk.length - offset;
+        final count = remaining < available ? remaining : available;
+        prefix.addAll(chunk.sublist(offset, offset + count));
+      }
+    },
+  );
+  if (manifestLength == null) {
+    throw const ArchiveException(
+      ArchiveErrorCode.invalidArchive,
+      'The encrypted body does not contain a manifest length.',
+    );
+  }
+  _validateManifestLength(manifestLength!, plainBodyLength, readPolicy);
+  if (prefix.length != 8 + manifestLength!) {
+    throw const ArchiveException(
+      ArchiveErrorCode.invalidArchive,
+      'The encrypted manifest is truncated.',
+    );
+  }
+  return _parseManifestBytes(
+    Uint8List.fromList(prefix.sublist(8)),
+    manifestLength: manifestLength!,
+    plainBodyLength: plainBodyLength,
+  );
+}
+
+Future<void> _processEncryptedBody({
+  required String archivePath,
+  required _ContainerHeader header,
+  required String passphrase,
+  required Future<void> Function(Uint8List chunk) onPlaintext,
+}) async {
   final input = await File(archivePath).open();
-  final bodyOutput = await output.open(mode: FileMode.write);
   Uint8List? key;
   try {
     await input.setPosition(header.bodyOffset);
-    GCMBlockCipher? cipher;
-    if (header.encryption == ArchiveEncryption.aes256Gcm) {
-      key = deriveArchiveKey(passphrase!, header.salt!);
-      cipher = createGcmCipher(
-        forEncryption: false,
-        key: key,
-        nonce: header.nonce!,
-        associatedData: Uint8List.fromList([
-          ...header.preambleBytes,
-          ...header.publicHeaderBytes,
-        ]),
-      );
-    }
+    key = deriveArchiveKey(passphrase, header.salt!);
+    final cipher = createGcmCipher(
+      forEncryption: false,
+      key: key,
+      nonce: header.nonce!,
+      associatedData: Uint8List.fromList([
+        ...header.preambleBytes,
+        ...header.publicHeaderBytes,
+      ]),
+    );
     var remaining = header.bodyLength;
     while (remaining > 0) {
       final chunk = await input.read(remaining < _ioChunkSize ? remaining : _ioChunkSize);
@@ -901,54 +994,57 @@ Future<void> _materializeBody({
       }
       remaining -= chunk.length;
       final bytes = Uint8List.fromList(chunk);
-      if (cipher == null) {
-        await bodyOutput.writeFrom(bytes);
-      } else {
-        final plain = Uint8List(bytes.length + 32);
-        final count = cipher.processBytes(bytes, 0, bytes.length, plain, 0);
-        if (count > 0) await bodyOutput.writeFrom(plain, 0, count);
+      final plain = Uint8List(bytes.length + 32);
+      final count = cipher.processBytes(bytes, 0, bytes.length, plain, 0);
+      if (count > 0) {
+        await onPlaintext(Uint8List.sublistView(plain, 0, count));
       }
     }
-    if (cipher != null) {
-      try {
-        final finalBytes = Uint8List(32);
-        final count = cipher.doFinal(finalBytes, 0);
-        if (count > 0) await bodyOutput.writeFrom(finalBytes, 0, count);
-      } on InvalidCipherTextException catch (error) {
-        throw ArchiveException(
-          ArchiveErrorCode.authenticationFailed,
-          'Archive authentication failed; the passphrase or data is invalid.',
-          error,
-        );
+    try {
+      final finalBytes = Uint8List(32);
+      final count = cipher.doFinal(finalBytes, 0);
+      if (count > 0) {
+        await onPlaintext(Uint8List.sublistView(finalBytes, 0, count));
       }
+    } on InvalidCipherTextException catch (error) {
+      throw ArchiveException(
+        ArchiveErrorCode.authenticationFailed,
+        'Archive authentication failed; the passphrase or data is invalid.',
+        error,
+      );
     }
-    await bodyOutput.flush();
   } finally {
     if (key != null) key.fillRange(0, key.length, 0);
     await input.close();
-    await bodyOutput.close();
   }
 }
 
-Future<_ParsedBody> _readManifest(File body) async {
-  final handle = await body.open();
-  try {
-    final bodyLength = await handle.length();
-    if (bodyLength < 8) {
-      throw const ArchiveException(
-        ArchiveErrorCode.invalidArchive,
-        'The archive body does not contain a manifest length.',
-      );
-    }
-    final manifestLength = readUint64(await _readExact(handle, 8));
-    if (manifestLength == 0 || manifestLength > maxManifestLength ||
-        manifestLength > bodyLength - 8) {
-      throw const ArchiveException(
-        ArchiveErrorCode.invalidArchive,
-        'The manifest length is invalid.',
-      );
-    }
-    final manifestBytes = await _readExact(handle, manifestLength);
+void _validateManifestLength(
+  int manifestLength,
+  int plainBodyLength,
+  ArchiveReadPolicy readPolicy,
+) {
+  if (manifestLength > readPolicy.maxManifestBytes) {
+    throw const ArchiveException(
+      ArchiveErrorCode.resourceLimitExceeded,
+      'The manifest exceeds the configured read limit.',
+    );
+  }
+  if (manifestLength == 0 ||
+      manifestLength > maxManifestLength ||
+      manifestLength > plainBodyLength - 8) {
+    throw const ArchiveException(
+      ArchiveErrorCode.invalidArchive,
+      'The manifest length is invalid.',
+    );
+  }
+}
+
+_ParsedBody _parseManifestBytes(
+  Uint8List manifestBytes, {
+  required int manifestLength,
+  required int plainBodyLength,
+}) {
     final manifest = decodeJsonObject(manifestBytes, 'manifest');
     if (manifest['format'] != 'NTA' || manifest['version'] != ntaVersion) {
       throw const ArchiveException(
@@ -965,7 +1061,6 @@ Future<_ParsedBody> _readManifest(File body) async {
     }
     final entries = <StoredEntry>[];
     final typesByPath = <String, ArchiveEntryType>{};
-    final foldedPaths = <String, String>{};
     for (final rawEntry in rawEntries) {
       if (rawEntry is! Map<String, Object?>) {
         throw const ArchiveException(
@@ -981,24 +1076,15 @@ Future<_ParsedBody> _readManifest(File body) async {
           'Duplicate archive path: ${stored.entry.path}',
         );
       }
-      final folded = stored.entry.path.toLowerCase();
-      final collision = foldedPaths[folded];
-      if (collision != null) {
-        throw ArchiveException(
-          ArchiveErrorCode.duplicateEntry,
-          'Case-insensitive path collision: $collision and ${stored.entry.path}',
-        );
-      }
       if (stored.entry.type == ArchiveEntryType.symbolicLink) {
         _validateLinkTarget(stored.entry.path, stored.entry.linkTarget!);
       }
       entries.add(stored);
       typesByPath[stored.entry.path] = stored.entry.type;
-      foldedPaths[folded] = stored.entry.path;
     }
     _validateParentEntries(typesByPath);
     final payloadStart = 8 + manifestLength;
-    final payloadLength = bodyLength - payloadStart;
+    final payloadLength = plainBodyLength - payloadStart;
     final files = entries
         .where((entry) => entry.entry.type == ArchiveEntryType.file)
         .toList()
@@ -1020,9 +1106,6 @@ Future<_ParsedBody> _readManifest(File body) async {
       );
     }
     return _ParsedBody(entries: entries, payloadStart: payloadStart);
-  } finally {
-    await handle.close();
-  }
 }
 
 StoredEntry _parseStoredEntry(Map<String, Object?> json) {
@@ -1219,6 +1302,57 @@ void _validateParentEntries(Map<String, ArchiveEntryType> typesByPath) {
   }
 }
 
+void _validateReadPolicy(ArchiveReadPolicy policy) {
+  if (policy.maxStoredBodyBytes < 1 ||
+      policy.maxManifestBytes < 1 ||
+      policy.maxManifestBytes > maxManifestLength) {
+    throw const ArchiveException(
+      ArchiveErrorCode.invalidArgument,
+      'Archive read limits must be positive and within format limits.',
+    );
+  }
+}
+
+Future<void> _validateTargetFilesystemPaths(
+  Directory staging,
+  List<StoredEntry> entries,
+) async {
+  final probe = await staging.createTemp('.nta-path-probe-');
+  final ordered = entries.toList()
+    ..sort((left, right) {
+      final depth = _pathDepth(left.entry.path)
+          .compareTo(_pathDepth(right.entry.path));
+      return depth != 0 ? depth : left.entry.path.compareTo(right.entry.path);
+    });
+  try {
+    for (final stored in ordered) {
+      final target = _targetPath(probe.path, stored.entry.path);
+      if (await FileSystemEntity.type(target, followLinks: false) !=
+          FileSystemEntityType.notFound) {
+        throw ArchiveException(
+          ArchiveErrorCode.filesystemCollision,
+          'Target filesystem aliases archive path ${stored.entry.path}.',
+        );
+      }
+      try {
+        if (stored.entry.type == ArchiveEntryType.directory) {
+          await Directory(target).create();
+        } else {
+          await File(target).create(exclusive: true);
+        }
+      } on FileSystemException catch (error) {
+        throw ArchiveException(
+          ArchiveErrorCode.filesystemCollision,
+          'Target filesystem cannot represent ${stored.entry.path} uniquely.',
+          error,
+        );
+      }
+    }
+  } finally {
+    if (await probe.exists()) await probe.delete(recursive: true);
+  }
+}
+
 void _validatePolicy(ArchiveExtractionPolicy policy) {
   if (policy.maxEntries < 1 || policy.maxEntryUncompressedBytes < 0 ||
       policy.maxTotalUncompressedBytes < 0) {
@@ -1260,6 +1394,13 @@ void _validateExtractionLimits(
 
 void _validateCriticalMetadata(List<StoredEntry> entries) {
   for (final stored in entries) {
+    final posixMode = stored.entry.posixMode;
+    if (posixMode != null && (posixMode & 0xc00) != 0) {
+      throw ArchiveException(
+        ArchiveErrorCode.unsupportedMetadata,
+        'Privileged setuid/setgid permissions are not allowed by the strict policy: ${stored.entry.path}',
+      );
+    }
     for (final name in stored.entry.criticalMetadata) {
       if (!_supportedCriticalMetadata.contains(name)) {
         throw ArchiveException(
@@ -1307,6 +1448,7 @@ Future<void> _extractFile({
   final entry = stored.entry;
   await _ensureSafeParentChain(stagingPath, entry.path);
   final target = File(_targetPath(stagingPath, entry.path));
+  await target.create(exclusive: true);
   final output = target.openWrite();
   final digest = SHA256Digest();
   final extractionSink = _ExtractionSink(
@@ -1351,6 +1493,57 @@ Future<void> _extractFile({
       ArchiveErrorCode.integrityMismatch,
       'SHA-256 mismatch for ${entry.path}.',
     );
+  }
+}
+
+Future<void> _extractEncryptedFiles({
+  required String archivePath,
+  required _ContainerHeader header,
+  required String passphrase,
+  required _ParsedBody parsed,
+  required String stagingPath,
+  required ArchiveExtractionPolicy policy,
+}) async {
+  final files = parsed.entries
+      .where((stored) => stored.entry.type == ArchiveEntryType.file)
+      .toList()
+    ..sort((left, right) => left.dataOffset!.compareTo(right.dataOffset!));
+  final extractor = _StreamingPayloadExtractor(
+    files: files,
+    stagingPath: stagingPath,
+    policy: policy,
+  );
+  var bytesToSkip = parsed.payloadStart;
+  var finished = false;
+  try {
+    await _processEncryptedBody(
+      archivePath: archivePath,
+      header: header,
+      passphrase: passphrase,
+      onPlaintext: (chunk) async {
+        var offset = 0;
+        if (bytesToSkip > 0) {
+          final count = bytesToSkip < chunk.length
+              ? bytesToSkip
+              : chunk.length;
+          bytesToSkip -= count;
+          offset = count;
+        }
+        if (offset < chunk.length) {
+          await extractor.add(Uint8List.sublistView(chunk, offset));
+        }
+      },
+    );
+    if (bytesToSkip != 0) {
+      throw const ArchiveException(
+        ArchiveErrorCode.invalidArchive,
+        'The encrypted payload is truncated before file data.',
+      );
+    }
+    await extractor.finish();
+    finished = true;
+  } finally {
+    if (!finished) await extractor.abort();
   }
 }
 
@@ -1589,6 +1782,143 @@ class _ParsedBody {
 
   final List<StoredEntry> entries;
   final int payloadStart;
+}
+
+class _StreamingPayloadExtractor {
+  _StreamingPayloadExtractor({
+    required this.files,
+    required this.stagingPath,
+    required this.policy,
+  });
+
+  final List<StoredEntry> files;
+  final String stagingPath;
+  final ArchiveExtractionPolicy policy;
+  int _fileIndex = 0;
+  _ActiveFileExtraction? _active;
+
+  Future<void> add(Uint8List bytes) async {
+    var offset = 0;
+    while (offset < bytes.length) {
+      await _startNextIfNeeded();
+      final active = _active;
+      if (active == null) {
+        throw const ArchiveException(
+          ArchiveErrorCode.invalidArchive,
+          'The encrypted payload contains unexpected trailing data.',
+        );
+      }
+      if (active.remainingStoredBytes == 0) {
+        await _finishActive();
+        continue;
+      }
+      final available = bytes.length - offset;
+      final count = active.remainingStoredBytes < available
+          ? active.remainingStoredBytes
+          : available;
+      active.dataSink.add(Uint8List.sublistView(bytes, offset, offset + count));
+      active.remainingStoredBytes -= count;
+      offset += count;
+      if (active.remainingStoredBytes == 0) await _finishActive();
+    }
+  }
+
+  Future<void> finish() async {
+    while (_fileIndex < files.length) {
+      await _startNextIfNeeded();
+      if (_active!.remainingStoredBytes != 0) {
+        throw ArchiveException(
+          ArchiveErrorCode.invalidArchive,
+          'Encrypted payload is truncated for ${_active!.stored.entry.path}.',
+        );
+      }
+      await _finishActive();
+    }
+  }
+
+  Future<void> abort() async {
+    final active = _active;
+    if (active == null) return;
+    try {
+      await active.output.close();
+    } on Object {
+      // The extraction error remains authoritative; staging is removed by the
+      // caller and no destination has been committed.
+    }
+    _active = null;
+  }
+
+  Future<void> _startNextIfNeeded() async {
+    if (_active != null || _fileIndex >= files.length) return;
+    final stored = files[_fileIndex];
+    await _ensureSafeParentChain(stagingPath, stored.entry.path);
+    final target = File(_targetPath(stagingPath, stored.entry.path));
+    await target.create(exclusive: true);
+    final output = target.openWrite();
+    final digest = SHA256Digest();
+    final extractionSink = _ExtractionSink(
+      output,
+      digest,
+      stored.entry.size,
+      policy.maxEntryUncompressedBytes,
+    );
+    final dataSink = stored.entry.compression == ArchiveCompression.zlib
+        ? ZLibDecoder().startChunkedConversion(extractionSink)
+        : extractionSink;
+    _active = _ActiveFileExtraction(
+      stored: stored,
+      output: output,
+      digest: digest,
+      extractionSink: extractionSink,
+      dataSink: dataSink,
+      remainingStoredBytes: stored.storedSize!,
+    );
+  }
+
+  Future<void> _finishActive() async {
+    final active = _active!;
+    try {
+      active.dataSink.close();
+      await active.output.close();
+    } on Object {
+      await active.output.close();
+      rethrow;
+    }
+    if (active.extractionSink.bytesWritten != active.stored.entry.size) {
+      throw ArchiveException(
+        ArchiveErrorCode.integrityMismatch,
+        'Expanded size mismatch for ${active.stored.entry.path}.',
+      );
+    }
+    final hash = Uint8List(active.digest.digestSize);
+    active.digest.doFinal(hash, 0);
+    if (hexEncode(hash) != active.stored.entry.sha256) {
+      throw ArchiveException(
+        ArchiveErrorCode.integrityMismatch,
+        'SHA-256 mismatch for ${active.stored.entry.path}.',
+      );
+    }
+    _active = null;
+    _fileIndex++;
+  }
+}
+
+class _ActiveFileExtraction {
+  _ActiveFileExtraction({
+    required this.stored,
+    required this.output,
+    required this.digest,
+    required this.extractionSink,
+    required this.dataSink,
+    required this.remainingStoredBytes,
+  });
+
+  final StoredEntry stored;
+  final IOSink output;
+  final SHA256Digest digest;
+  final _ExtractionSink extractionSink;
+  final Sink<List<int>> dataSink;
+  int remainingStoredBytes;
 }
 
 class _CountingSink implements Sink<List<int>> {

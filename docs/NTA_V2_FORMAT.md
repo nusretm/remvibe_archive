@@ -55,6 +55,8 @@ Critical metadata must be understood and applicable on the extraction target.
 Unknown or inapplicable critical metadata aborts extraction. A non-critical
 metadata failure is returned as a warning by the strict policy; callers may set
 `failOnNonCriticalMetadataError` to turn those warnings into failures.
+The default policy always rejects setuid and setgid bits (`04000`/`02000`);
+there is no privileged-permission opt-in in NTA V2's current API.
 
 ## Extraction policy and threat model
 
@@ -64,9 +66,23 @@ manifest. It rejects:
 - malformed/truncated headers, trailing data, unsupported versions/algorithms;
 - absolute, drive, UNC, backslash, traversal, reserved-Windows, or ambiguous
   paths;
-- duplicate paths, case-fold collisions, missing/non-directory parents;
+- exact duplicate paths and missing/non-directory parents;
 - unsupported entry types, unsafe symlink targets, overlapping payloads;
 - configured entry-count, per-file, and total expanded-size limits.
+
+Case-distinct and normalization-distinct paths are valid archive identities.
+Before writing entries, extraction builds a placeholder tree on the actual
+target volume. If that filesystem aliases any paths by case folding, Unicode
+normalization, or another naming rule, extraction fails before payload writes.
+This avoids both unnecessary source restrictions and silent target overwrites.
+
+`ArchiveReadPolicy` applies stored-body and manifest limits immediately after
+the fixed preamble is read. Unencrypted payloads are read directly from the
+archive rather than copied into a second body file. Encrypted archives are
+stream-authenticated while retaining only the bounded manifest in memory. After
+that authentication succeeds, a second streaming pass feeds payload data
+directly into staged output files and revalidates the GCM tag before commit. No
+complete decrypted `body.bin` is written to temporary storage.
 
 Extraction occurs in a random sibling staging directory. Regular files are
 streamed through decompression and SHA-256 verification. Symlinks are created

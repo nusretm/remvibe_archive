@@ -22,6 +22,28 @@ void main() {
   });
 
   group('round trip', () {
+    test('archives source names that differ only by case when supported', () async {
+      final supportsDistinctNames = !await _filesystemAliases(
+        temporaryDirectory,
+        'Config.json',
+        'config.json',
+      );
+      if (!supportsDistinctNames) return;
+      final source = Directory(p.join(temporaryDirectory.path, 'case-source'));
+      await source.create();
+      await File(p.join(source.path, 'Config.json')).writeAsString('upper');
+      await File(p.join(source.path, 'config.json')).writeAsString('lower');
+      final archivePath = p.join(temporaryDirectory.path, 'case-source.nta');
+      final creator = RemvibeArchive.create(output: archivePath);
+      await creator.addDirectory(source.path);
+      await creator.save();
+      final archive = await RemvibeArchive.open(archivePath);
+      expect(
+        archive.entries.map((entry) => entry.path),
+        containsAll(['case-source/Config.json', 'case-source/config.json']),
+      );
+    });
+
     test('preserves nested, empty, binary, and metadata content', () async {
       final source = Directory(p.join(temporaryDirectory.path, 'Release'));
       final nested = Directory(p.join(source.path, 'data', 'empty'));
@@ -90,12 +112,23 @@ void main() {
         RemvibeArchive.open(archiveFile, passphrase: 'wrong'),
         throwsA(_archiveError(ArchiveErrorCode.authenticationFailed)),
       );
-      final archive = await RemvibeArchive.open(
-        archiveFile,
-        passphrase: 'correct horse battery staple',
+      final openWatch = await _runWhileWatching(
+        directory: Directory.systemTemp,
+        matches: (name) => name.startsWith('nta-open-'),
+        operation: () => RemvibeArchive.open(
+          archiveFile,
+          passphrase: 'correct horse battery staple',
+        ),
       );
+      expect(openWatch.observed, isFalse);
+      final archive = openWatch.value;
       final destination = p.join(temporaryDirectory.path, 'private-output');
-      await archive.extract(destination: destination);
+      final extractionWatch = await _runWhileWatching(
+        directory: temporaryDirectory,
+        matches: (name) => name.contains('.nta-body-'),
+        operation: () => archive.extract(destination: destination),
+      );
+      expect(extractionWatch.observed, isFalse);
       expect(
         await File(p.join(destination, 'secret.bin')).readAsBytes(),
         await source.readAsBytes(),
@@ -163,7 +196,7 @@ void main() {
       });
     }
 
-    test('rejects duplicate and case-insensitive collisions', () async {
+    test('rejects exact duplicate paths', () async {
       final duplicate = File(p.join(temporaryDirectory.path, 'duplicate.nta'));
       await _writeRawArchive(
         duplicate,
@@ -174,15 +207,72 @@ void main() {
         throwsA(_archiveError(ArchiveErrorCode.duplicateEntry)),
       );
 
+    });
+
+    test('evaluates case collisions on the target filesystem', () async {
       final collision = File(p.join(temporaryDirectory.path, 'collision.nta'));
+      final first = utf8.encode('upper');
+      final second = utf8.encode('lower');
       await _writeRawArchive(
         collision,
-        [_directoryEntry('Readme'), _directoryEntry('README')],
+        [
+          _fileEntry('Config.json', first),
+          _fileEntry('config.json', second, dataOffset: first.length),
+        ],
+        payload: [...first, ...second],
       );
-      await expectLater(
-        RemvibeArchive.open(collision.path),
-        throwsA(_archiveError(ArchiveErrorCode.duplicateEntry)),
+      final archive = await RemvibeArchive.open(collision.path);
+      expect(archive.entries, hasLength(2));
+      final aliases = await _filesystemAliases(
+        temporaryDirectory,
+        'Config.json',
+        'config.json',
       );
+      final destination = p.join(temporaryDirectory.path, 'case-output');
+      if (aliases) {
+        await expectLater(
+          archive.extract(destination: destination),
+          throwsA(_archiveError(ArchiveErrorCode.filesystemCollision)),
+        );
+        expect(await Directory(destination).exists(), isFalse);
+      } else {
+        await archive.extract(destination: destination);
+        expect(await File(p.join(destination, 'Config.json')).readAsString(), 'upper');
+        expect(await File(p.join(destination, 'config.json')).readAsString(), 'lower');
+      }
+    });
+
+    test('evaluates Unicode normalization collisions on the target', () async {
+      const composed = 'caf\u00e9.txt';
+      const decomposed = 'cafe\u0301.txt';
+      final first = utf8.encode('composed');
+      final second = utf8.encode('decomposed');
+      final file = File(p.join(temporaryDirectory.path, 'unicode.nta'));
+      await _writeRawArchive(
+        file,
+        [
+          _fileEntry(composed, first),
+          _fileEntry(decomposed, second, dataOffset: first.length),
+        ],
+        payload: [...first, ...second],
+      );
+      final archive = await RemvibeArchive.open(file.path);
+      final aliases = await _filesystemAliases(
+        temporaryDirectory,
+        composed,
+        decomposed,
+      );
+      final destination = p.join(temporaryDirectory.path, 'unicode-output');
+      if (aliases) {
+        await expectLater(
+          archive.extract(destination: destination),
+          throwsA(_archiveError(ArchiveErrorCode.filesystemCollision)),
+        );
+      } else {
+        await archive.extract(destination: destination);
+        expect(await File(p.join(destination, composed)).readAsString(), 'composed');
+        expect(await File(p.join(destination, decomposed)).readAsString(), 'decomposed');
+      }
     });
 
     test('rejects unexpected entry types and unsafe symlinks', () async {
@@ -225,6 +315,23 @@ void main() {
   });
 
   group('safe extraction', () {
+    test('rejects stored bodies above the read limit before processing', () async {
+      final file = File(p.join(temporaryDirectory.path, 'read-limit.nta'));
+      final data = List<int>.filled(128, 7);
+      await _writeRawArchive(
+        file,
+        [_fileEntry('data.bin', data)],
+        payload: data,
+      );
+      await expectLater(
+        RemvibeArchive.open(
+          file.path,
+          readPolicy: const ArchiveReadPolicy(maxStoredBodyBytes: 64),
+        ),
+        throwsA(_archiveError(ArchiveErrorCode.resourceLimitExceeded)),
+      );
+    });
+
     test('verifies SHA-256 and removes partial staging output', () async {
       final file = File(p.join(temporaryDirectory.path, 'bad-sha.nta'));
       final first = utf8.encode('first');
@@ -334,6 +441,31 @@ void main() {
       );
     });
 
+    for (final mode in [0x9ed, 0x5ed]) {
+      test('rejects privileged POSIX mode 0x${mode.toRadixString(16)}', () async {
+        final data = utf8.encode('privileged');
+        final file = File(p.join(temporaryDirectory.path, 'privileged-$mode.nta'));
+        await _writeRawArchive(
+          file,
+          [
+            {
+              ..._fileEntry('program', data),
+              'posixMode': mode,
+              'criticalMetadata': ['posixMode'],
+            },
+          ],
+          payload: data,
+        );
+        final archive = await RemvibeArchive.open(file.path);
+        final destination = p.join(temporaryDirectory.path, 'privileged-$mode-output');
+        await expectLater(
+          archive.extract(destination: destination),
+          throwsA(_archiveError(ArchiveErrorCode.unsupportedMetadata)),
+        );
+        expect(await Directory(destination).exists(), isFalse);
+      });
+    }
+
     test(
       'rejects critical POSIX metadata on Windows',
       () async {
@@ -407,6 +539,57 @@ void main() {
 
 Matcher _archiveError(ArchiveErrorCode code) =>
     isA<ArchiveException>().having((error) => error.code, 'code', code);
+
+Future<bool> _filesystemAliases(
+  Directory parent,
+  String firstName,
+  String secondName,
+) async {
+  final probe = await parent.createTemp('filesystem-alias-');
+  try {
+    await File(p.join(probe.path, firstName)).create(exclusive: true);
+    if (await FileSystemEntity.type(
+          p.join(probe.path, secondName),
+          followLinks: false,
+        ) !=
+        FileSystemEntityType.notFound) {
+      return true;
+    }
+    try {
+      await File(p.join(probe.path, secondName)).create(exclusive: true);
+      return false;
+    } on FileSystemException {
+      return true;
+    }
+  } finally {
+    await probe.delete(recursive: true);
+  }
+}
+
+Future<({T value, bool observed})> _runWhileWatching<T>({
+  required Directory directory,
+  required bool Function(String name) matches,
+  required Future<T> Function() operation,
+}) async {
+  final initial = await directory
+      .list(followLinks: false)
+      .map((entry) => p.basename(entry.path))
+      .where(matches)
+      .toSet();
+  var completed = false;
+  var observed = false;
+  final future = operation().whenComplete(() => completed = true);
+  while (!completed) {
+    final current = await directory
+        .list(followLinks: false)
+        .map((entry) => p.basename(entry.path))
+        .where(matches)
+        .toSet();
+    if (current.difference(initial).isNotEmpty) observed = true;
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+  }
+  return (value: await future, observed: observed);
+}
 
 Map<String, Object?> _baseEntry(String path, String type) => {
       'path': path,

@@ -16,8 +16,12 @@ the library.
   and nonce; no default key;
 - regular files, directories, empty entries, symbolic links, modification time,
   POSIX modes, extensible platform metadata, and critical-metadata semantics;
-- portable path validation, duplicate/case collision detection, safe symlink
-  targets, bounded entry/expanded sizes, and contiguous payload validation;
+- portable path validation, exact duplicate detection, target-filesystem
+  case/Unicode collision probing, safe symlink targets, early stored-body and
+  expanded-size limits, and contiguous payload validation;
+- encrypted streaming authentication/extraction without a plaintext body temp
+  file, plus direct unencrypted payload reads without a second full copy;
+- strict rejection of setuid/setgid permissions before payload writes;
 - sibling staging extraction with cleanup and final rename to an absent
   destination;
 - Windows, Ubuntu, and macOS CI jobs for analyzer and tests.
@@ -46,6 +50,14 @@ Local Windows x64 evidence:
   headers, authenticated-encryption tampering, SHA-256 mismatch, entry/size
   limits, compressed over-expansion, unsupported critical metadata, existing
   destinations, I/O failure, and staging cleanup after partial extraction.
+
+PR review fixes were locally validated on Windows at the reviewed base
+`e561a7f`: `dart analyze lib test` passed and `dart test -r expanded` reported
+24 passed with 2 platform-gated skips. Added regressions cover case-distinct
+source names, target-dependent case and Unicode normalization collisions,
+`04755`/`02755` rejection, absence of plaintext body temp artifacts, and early
+stored-body limit rejection. Updated cross-platform CI evidence will be recorded
+after the Draft PR head run completes.
 
 ## Deferred and not claimed
 

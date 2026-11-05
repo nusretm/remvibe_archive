@@ -7,6 +7,7 @@ enum ArchiveErrorCode {
   integrityMismatch,
   unsafePath,
   duplicateEntry,
+  filesystemCollision,
   resourceLimitExceeded,
   unsupportedMetadata,
   destinationExists,

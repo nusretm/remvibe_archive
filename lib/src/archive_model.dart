@@ -46,6 +46,18 @@ class ArchiveExtractionPolicy {
   final bool failOnNonCriticalMetadataError;
 }
 
+class ArchiveReadPolicy {
+  const ArchiveReadPolicy({
+    this.maxStoredBodyBytes = 64 * 1024 * 1024 * 1024,
+    this.maxManifestBytes = 16 * 1024 * 1024,
+  });
+
+  static const strict = ArchiveReadPolicy();
+
+  final int maxStoredBodyBytes;
+  final int maxManifestBytes;
+}
+
 class ArchiveExtractionResult {
   const ArchiveExtractionResult({
     required this.destination,
