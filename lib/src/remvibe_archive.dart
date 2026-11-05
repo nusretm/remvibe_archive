@@ -1362,10 +1362,12 @@ Future<void> _applyMetadata(
 ) async {
   if (entry.type == ArchiveEntryType.symbolicLink) return;
   try {
-    if (Platform.isWindows && entry.type == ArchiveEntryType.directory) {
-      final result = await Process.run(
-        'powershell.exe',
-        [
+    if (entry.type == ArchiveEntryType.directory) {
+      final String executable;
+      final List<String> arguments;
+      if (Platform.isWindows) {
+        executable = 'powershell.exe';
+        arguments = [
           '-NoLogo',
           '-NoProfile',
           '-NonInteractive',
@@ -1373,19 +1375,26 @@ Future<void> _applyMetadata(
           r'& { param($targetPath, $timestamp) [System.IO.Directory]::SetLastWriteTimeUtc($targetPath, [DateTime]::Parse($timestamp, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)) }',
           targetPath,
           entry.modifiedTimeUtc.toIso8601String(),
-        ],
-      );
+        ];
+      } else {
+        executable = 'touch';
+        arguments = [
+          '-m',
+          '-t',
+          _posixTouchTimestamp(entry.modifiedTimeUtc.toLocal()),
+          targetPath,
+        ];
+      }
+      final result = await Process.run(executable, arguments);
       if (result.exitCode != 0) {
         throw ProcessException(
-          'powershell.exe',
-          const [],
+          executable,
+          arguments,
           '${result.stderr}',
           result.exitCode,
         );
       }
     } else {
-      // File.setLastModified is a path operation and also works for directories
-      // on POSIX hosts. Windows requires the directory-specific call above.
       await File(targetPath).setLastModified(entry.modifiedTimeUtc);
     }
   } on Object catch (error) {
@@ -1414,6 +1423,14 @@ Future<void> _applyMetadata(
       }
     }
   }
+}
+
+String _posixTouchTimestamp(DateTime value) {
+  String twoDigits(int number) => number.toString().padLeft(2, '0');
+  return '${value.year.toString().padLeft(4, '0')}'
+      '${twoDigits(value.month)}${twoDigits(value.day)}'
+      '${twoDigits(value.hour)}${twoDigits(value.minute)}'
+      '.${twoDigits(value.second)}';
 }
 
 void _metadataFailure(
