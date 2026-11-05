@@ -22,12 +22,23 @@ the library.
   destination;
 - Windows, Ubuntu, and macOS CI jobs for analyzer and tests.
 
-## Local evidence (Windows x64, 2026-11-05)
+## Validation evidence (2026-11-05)
+
+GitHub Actions run `42002154047` passed at commit `2137d10` on all three
+supported desktop operating-system families:
+
+- Windows job `127159774719`: analyzer and tests passed; Windows-specific
+  directory modification-time behavior passed.
+- Ubuntu job `127159773752`: analyzer and tests passed; real symbolic-link and
+  POSIX executable-mode round trips passed.
+- macOS job `127159774215`: analyzer and tests passed; real symbolic-link and
+  POSIX executable-mode round trips passed.
+
+Local Windows x64 evidence:
 
 - `dart analyze`: clean, including the Flutter example on the installed local
   Flutter SDK.
-- `dart test`: all applicable tests pass. The real symbolic-link and POSIX mode
-  tests are platform-gated and therefore await Linux/macOS CI evidence.
+- `dart test`: 18 passed and 2 correctly platform-gated tests skipped.
 - Real unencrypted and encrypted create/open/extract round trips were exercised
   by tests, including a payload larger than the internal 1 MiB I/O chunk.
 - Negative tests cover traversal/absolute/drive/UNC paths, case collisions,
@@ -36,9 +47,8 @@ the library.
   limits, compressed over-expansion, unsupported critical metadata, existing
   destinations, I/O failure, and staging cleanup after partial extraction.
 
-## Deferred and not yet claimed
+## Deferred and not claimed
 
-- Linux/macOS CI results are not recorded until the Draft PR jobs run.
 - Windows symbolic-link creation is not claimed because it depends on host
   privilege/developer-mode policy.
 - ACLs, ownership, xattrs, macOS resource forks, Windows alternate data streams
