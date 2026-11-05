@@ -51,13 +51,20 @@ Local Windows x64 evidence:
   limits, compressed over-expansion, unsupported critical metadata, existing
   destinations, I/O failure, and staging cleanup after partial extraction.
 
-PR review fixes were locally validated on Windows at the reviewed base
-`e561a7f`: `dart analyze lib test` passed and `dart test -r expanded` reported
+PR review fixes were locally validated on Windows before commit `5e0266b`:
+`dart analyze lib test` passed and `dart test -r expanded` reported
 24 passed with 2 platform-gated skips. Added regressions cover case-distinct
 source names, target-dependent case and Unicode normalization collisions,
 `04755`/`02755` rejection, absence of plaintext body temp artifacts, and early
-stored-body limit rejection. Updated cross-platform CI evidence will be recorded
-after the Draft PR head run completes.
+stored-body limit rejection.
+
+Review-fix commit `5e0266b` passed GitHub Actions run `42005801303`:
+
+- Windows job `127172098103`: analyzer and tests passed.
+- Ubuntu job `127172097909`: analyzer and tests passed, including the
+  case-distinct source and POSIX permission paths.
+- macOS job `127172097718`: analyzer and tests passed, including target
+  filesystem case/normalization probing and POSIX paths.
 
 ## Deferred and not claimed
 
