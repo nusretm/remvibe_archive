@@ -1,104 +1,78 @@
-# Remvibe Archive
+# RemVibe Archive
 
-A Dart library for creating and managing encrypted archive files with AES encryption, compatible with Remvibe archive format.
+`remvibe_archive` creates and extracts cross-platform NTA V2 archives. NTA V2
+preserves directory structure, SHA-256 digests, modification times, POSIX
+permissions, empty files/directories, and safe symbolic links. File content is
+streamed during compression, encryption, hashing, and extraction.
 
-## Features
+NTA V2 is intentionally incompatible with the old Delphi format.
 
-- AES encryption for secure archiving
-- Support for hierarchical folders and files
-- CRC32 checksums for data integrity verification
-- ZLib compression for efficient storage
-- Compatible with existing Remvibe archive format (Delphi-based)
-
-## Installation
-
-Add `Remvibe_archive` to your `pubspec.yaml` dependencies:
-
-```yaml
-dependencies:
-  Remvibe_archive: ^1.0.0
-```
-
-Then run:
-
-```bash
-dart pub get
-```
-
-## Usage
-
-### Creating an Archive
+## Create an unencrypted update package
 
 ```dart
-import 'package:Remvibe_archive/Remvibe_archive.dart';
+final archive = RemvibeArchive.create(
+  output: 'update.nta',
+  encryption: ArchiveEncryption.none,
+);
 
-void main() {
-  // Create a new archive with a passphrase
-  var archive = RemvibeArchive('your_secret_passphrase', 'my_archive.nta');
-
-  // Add files and folders to the root
-  // (Implementation depends on ArchiveFolder and ArchiveFile classes)
-
-  // Save the archive to file
-  archive.updateFile();
-}
+await archive.addDirectory('build/windows/Release');
+await archive.save();
 ```
 
-### Loading an Archive
+`addDirectory` includes the source directory itself by default. Pass
+`archivePath: ''` to include only its children, or another relative POSIX path
+to choose its archive location.
+
+## Create an encrypted archive
 
 ```dart
-import 'package:Remvibe_archive/Remvibe_archive.dart';
+final archive = RemvibeArchive.create(
+  output: 'private.nta',
+  encryption: ArchiveEncryption.aes256Gcm,
+  passphrase: passphraseFromTheUser,
+);
 
-void main() {
-  // Load an existing archive
-  var archive = RemvibeArchive('your_secret_passphrase', 'my_archive.nta');
-
-  if (archive.loadFromFile()) {
-    print('Archive loaded successfully');
-
-    // Access files
-    for (var file in archive.root.files) {
-      print('File: ${file.fullName}');
-      // Extract file if needed
-      var error = file.extract('output_directory');
-      if (error.isNotEmpty) {
-        print('Extraction error: $error');
-      }
-    }
-  } else {
-    print('Failed to load archive');
-  }
-}
+await archive.addFile('report.bin');
+await archive.save();
 ```
 
-### Command Line Usage
+Encrypted archives use AES-256-GCM and a random nonce. The key is derived with
+scrypt and a random salt; there is no default key.
 
-The package includes a command-line tool in `bin/Remvibe_archive.dart` for basic operations:
+## Extract
 
-```bash
-dart run Remvibe_archive
+```dart
+final archive = await RemvibeArchive.open(
+  'update.nta',
+  // passphrase: required only for an encrypted archive
+  readPolicy: ArchiveReadPolicy.strict,
+);
+
+final result = await archive.extract(
+  destination: 'staging',
+  policy: ArchiveExtractionPolicy.strict,
+);
 ```
 
-## API Reference
+Extraction requires a destination that does not already exist. Content is
+validated in a sibling staging directory and renamed into place only after all
+entries, SHA-256 digests, limits, and critical metadata succeed. Non-critical
+metadata failures are returned in `result.warnings`.
 
-### RemvibeArchive
+Archive paths that differ by case or Unicode normalization are preserved in the
+container. Before extraction, the library probes the actual target filesystem
+and rejects any names that the target aliases; it never silently overwrites one
+entry with another. The strict policy also rejects setuid/setgid permissions.
 
-- `RemvibeArchive(String cryptKey, String fileName)`: Constructor that initializes the archive with an encryption key and file path.
-- `void updateFile()`: Encrypts and writes the archive structure and content to the specified file.
-- `bool loadFromFile()`: Decrypts and loads the archive from the file, returning true on success.
+## Security boundary
 
-### ArchiveFolder
+Encryption protects archive confidentiality and authenticates the encrypted
+container. Encrypted bodies are authenticated and streamed without writing a
+complete plaintext body to temporary storage. `ArchiveReadPolicy` bounds stored
+body and manifest processing before those bytes are consumed. SHA-256 detects
+per-file corruption. Neither mechanism establishes
+publisher identity: software updates still require separately signed trusted
+release metadata or a digital signature.
 
-Represents a folder in the archive hierarchy.
-
-### ArchiveFile
-
-Represents a file in the archive with methods for extraction.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues and pull requests.
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+See [docs/NTA_V2_FORMAT.md](docs/NTA_V2_FORMAT.md) for the format and threat
+model.

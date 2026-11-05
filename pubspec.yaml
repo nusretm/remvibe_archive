@@ -1,8 +1,8 @@
 publish: none
 name: remvibe_archive
-description: A Dart library for creating and managing encrypted archive files with AES encryption, compatible with Remvibe archive format.
-version: 1.0.0
-# repository: https://github.com/my_org/my_repo
+description: Secure, streaming NTA V2 archive creation and extraction for Dart.
+version: 2.0.0-dev.1
+repository: https://github.com/nusretm/remvibe_archive
 
 environment:
   sdk: ^3.10.3

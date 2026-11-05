@@ -14,7 +14,10 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   bool _dragging = false;
-  RemvibeArchive archive = RemvibeArchive();
+  late final RemvibeArchive archive = RemvibeArchive.create(
+    output:
+        '${Directory.systemTemp.path}${Platform.pathSeparator}example.nta',
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -31,7 +34,7 @@ class _MainScreenState extends State<MainScreen> {
             String aPath = file.path.replaceFirst(aName, '');
             Directory dirTest = Directory(file.path);
             if (dirTest.existsSync()) {
-              archive.addFolder(file.path);
+              await archive.addDirectory(file.path);
               debugPrint(
                 '>>>>> $aPath -> $aName (Folder)'
               );
@@ -45,7 +48,6 @@ class _MainScreenState extends State<MainScreen> {
               );
             }
           }
-          archive.debugPrint();
         },
         onDragUpdated: (detail) {
           //debugPrint("${detail.localPosition.dx}x${detail.localPosition.dy}");
@@ -100,7 +102,8 @@ class _MainScreenState extends State<MainScreen> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
+        onPressed: () async {
+          await archive.save();
         },
         tooltip: 'Increment',
         child: const Icon(Icons.add),
