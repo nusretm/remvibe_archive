@@ -76,3 +76,17 @@ release metadata or a digital signature.
 
 See [docs/NTA_V2_FORMAT.md](docs/NTA_V2_FORMAT.md) for the format and threat
 model.
+
+## Native C++ reader
+
+`native/` is an independent CMake C++17 project for applications that cannot
+ship the Dart runtime. It currently reads and extracts unencrypted NTA V2
+archives with regular files/directories, `none` or `zlib` compression,
+contiguous payload validation, bounded expansion, path/collision checks, and
+per-file SHA-256 verification. Symbolic links and unsupported critical
+metadata fail explicitly in this first native profile.
+
+The library is a static target named `remvibe::archive_native`. Its CMake build
+fetches exact pinned upstream commits of zlib and nlohmann/json and links zlib
+statically. On MSVC it uses the static C++ runtime. The source and API are
+cross-platform; UC-INSTALLER-01A validates the Windows x64 consumer first.
