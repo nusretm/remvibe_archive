@@ -370,6 +370,7 @@ nta_v2_reader nta_v2_reader::open(const fs::path& archive_path,
       entry.data_offset = unsigned_integer(raw["dataOffset"], "dataOffset");
       entry.stored_size = unsigned_integer(raw["storedSize"], "storedSize");
       if (entry.size > limits.max_entry_uncompressed_bytes ||
+          entry.size > limits.max_total_uncompressed_bytes ||
           total_size > limits.max_total_uncompressed_bytes - entry.size) {
         throw archive_error("NTA expanded-size limit exceeded.");
       }
@@ -393,6 +394,9 @@ nta_v2_reader nta_v2_reader::open(const fs::path& archive_path,
     if (entry.type == entry_type::file) files.push_back(&entry);
   }
   std::sort(files.begin(), files.end(), [](const auto* left, const auto* right) {
+    if (left->data_offset == right->data_offset) {
+      return left->stored_size < right->stored_size;
+    }
     return left->data_offset < right->data_offset;
   });
   std::uint64_t expected_offset = 0;
