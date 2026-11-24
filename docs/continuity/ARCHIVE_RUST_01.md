@@ -1,27 +1,6 @@
-# ARCHIVE-RUST-01 — approved planning scope
+# ARCHIVE-RUST-01 — revised architecture
 
-Updated: 2026-11-24. Planned only. Source baseline inspected: main e38c10792d71299601b147a39700ed0e9ab2d51a. Recheck HEAD at implementation start.
+Planning only. New Rust rlib reader/writer; selected entries, empty files/directories, streaming zlib/none, SHA-256, real progress/cancel, bounded validation and staging. Reuse FileSystem Core for native metadata and permissions. Rust round trip and Windows/Linux real acceptance; no V2 compatibility requirement. ARCHIVE-FFI-01 for Dart/C++ adapters and ARCHIVE-MIGRATION-01 for coordinated consumers follow separately. Inspect exact sources and dependencies before each checkpoint. No implementation authorized yet.
 
-## Goal
-
-Provide an independent Rust core reader/writer for the existing NTA V2 unencrypted profile, statically consumable by Rust applications and usable by higher-level transfer libraries. Preserve the existing Dart reader/writer and C++ reader. No NTA V3 or format change.
-
-## Scope
-
-- Existing NTA V2 envelope/manifest, big-endian integers, relative POSIX archive paths, contiguous payload ranges, zlib and none, per-file SHA-256, streaming read/write.
-- Regular files, directories, empty files/directories, UTC modification times and supported POSIX permissions; honor the established critical metadata rules, including explicit errors for unsupported critical metadata and setuid/setgid rejection.
-- Selected source files with explicit archive-relative paths; nonrecursive directory entry support so callers can exclude large files while retaining correct parents and empty directories. Archive batching/classification belongs to the caller, not this library.
-- Real preparation/compression/extraction progress events and lifecycle/cleanup suitable for cancellation; exact Rust API and dependency choices reviewed at implementation.
-- Preserve existing path, collision, size-limit, integrity and staging extraction contracts in docs/NTA_V2_FORMAT.md. Extract to an absent destination via sibling staging; do not introduce merge/overwrite or transfer finalization logic.
-- No encrypted NTA support in this initial Rust profile. Symbolic link support/policy remains an explicit checkpoint decision; do not silently omit entries. Unsupported entries/metadata fail explicitly. Existing deferred NTA features remain deferred.
-
-## Acceptance
-
-- Rust-to-Rust round trip; Dart-to-Rust and Rust-to-Dart round trips for the common supported profile; Rust-to-C++ extraction for its existing supported profile (including its metadata/platform restrictions).
-- Both zlib and none, empty entries, selected-file packaging, nonrecursive directories, streaming larger-than-buffer content, supported metadata and real progress.
-- Preserve format validation, corruption/limit/path rejection and staging cleanup on errors. Focused checks only; no unrelated test or CI expansion.
-- Real Windows/Linux acceptance with actual evidence; macOS design compatibility only. Existing Dart/C++ behavior unchanged. Do not claim unexecuted tests or builds.
-
-## Non-goals
-
-No replacement of existing implementations, new archive format, encrypted Rust profile, installer/updater work, network transport, filesystem manager, file transfer orchestration, UI, FFI framework or unrelated CI/security work. A subsequent caller may consume the Rust crate directly; no standalone archive DLL is required by this checkpoint.
+## Approved revision — 2026-11-24
+Operator approved FileSystem as shared native metadata and permission authority, Archive redesign without backward compatibility, and FileTransfer using both. Dependency direction: Archive -> FileSystem; FileTransfer -> FileSystem, Archive, existing Networking. Shared FileSystemMetadata, FileSystemPermissions, selective metadata application policy/results; cheap listing vs full read; native chmod/chown/chgrp, Windows DACL/owner/group/attributes and supported timestamps. No duplicated algorithms, no automatic foreign UID/SID mapping, owner/ACL restoration opt-in, no automatic privileged mode restoration. Direct and archived transfer must apply identical policy. New archive format (working name NTA V3), no V2 reader/converter/parallel compatibility obligation. Single Rust archive implementation with later Dart/C++ C ABI adapters; retain existing V2 consumers until coordinated migration of packager/updater/installer. Preserve streaming, integrity, limits, collision/path checks and staging; exact new format, encryption and link semantics at Archive checkpoint. Sequence FS-CORE-01 -> FS-FFI-01 -> FS-FLUTTER-01 -> ARCHIVE-RUST-01 -> ARCHIVE-FFI-01 -> ARCHIVE-MIGRATION-01 -> FT-NETWORKING-01 -> FT-CORE-01 -> FT-FFI-01 -> UC-FILESYSTEM-01A–E. Prior incompatible roadmap statements superseded. No source changes authorized here; Windows/Linux acceptance, macOS design only.

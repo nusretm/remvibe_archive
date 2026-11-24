@@ -1,9 +1,6 @@
 # RemVibe Archive — current target
 
-Updated: 2026-11-24. Planning baseline only; Rust implementation and runtime acceptance NOT STARTED.
+2026-11-24: revised planning only; ARCHIVE-RUST-01 waits for FS-CORE-01, FS-FFI-01, FS-FLUTTER-01 acceptance and explicit approval. See [ARCHIVE_RUST_01.md](ARCHIVE_RUST_01.md). Existing NTA V2 code unchanged; historical evidence [UC3_CHECKPOINT.md](../UC3_CHECKPOINT.md).
 
-## Planned checkpoint: ARCHIVE-RUST-01
-
-Add a reusable Rust NTA V2 reader and writer for the unencrypted regular-file/directory profile. Existing Dart and C++ implementations and the format remain unchanged. See [ARCHIVE_RUST_01.md](ARCHIVE_RUST_01.md) for scope, constraints and acceptance. Existing evidence remains in [UC3_CHECKPOINT.md](../UC3_CHECKPOINT.md).
-
-Start in a dedicated development conversation only when the operator approves the bounded checkpoint. Inspect current HEAD, source and format documents before choosing APIs or dependencies. No other implementation is authorized by this planning record.
+## Approved revision — 2026-11-24
+Operator approved FileSystem as shared native metadata and permission authority, Archive redesign without backward compatibility, and FileTransfer using both. Dependency direction: Archive -> FileSystem; FileTransfer -> FileSystem, Archive, existing Networking. Shared FileSystemMetadata, FileSystemPermissions, selective metadata application policy/results; cheap listing vs full read; native chmod/chown/chgrp, Windows DACL/owner/group/attributes and supported timestamps. No duplicated algorithms, no automatic foreign UID/SID mapping, owner/ACL restoration opt-in, no automatic privileged mode restoration. Direct and archived transfer must apply identical policy. New archive format (working name NTA V3), no V2 reader/converter/parallel compatibility obligation. Single Rust archive implementation with later Dart/C++ C ABI adapters; retain existing V2 consumers until coordinated migration of packager/updater/installer. Preserve streaming, integrity, limits, collision/path checks and staging; exact new format, encryption and link semantics at Archive checkpoint. Sequence FS-CORE-01 -> FS-FFI-01 -> FS-FLUTTER-01 -> ARCHIVE-RUST-01 -> ARCHIVE-FFI-01 -> ARCHIVE-MIGRATION-01 -> FT-NETWORKING-01 -> FT-CORE-01 -> FT-FFI-01 -> UC-FILESYSTEM-01A–E. Prior incompatible roadmap statements superseded. No source changes authorized here; Windows/Linux acceptance, macOS design only.
