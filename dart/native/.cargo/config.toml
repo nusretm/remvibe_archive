@@ -1,0 +1,3 @@
+# Keep the Windows FFI library independent of separately installed MSVC CRT.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

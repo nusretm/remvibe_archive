@@ -26,9 +26,11 @@ Future<void> main(List<String> args) async {
     final root = input.packageRoot.resolve('../');
     final native = input.packageRoot.resolve('native/');
     final manifest = native.resolve('Cargo.toml');
+    final cargoConfig = native.resolve('.cargo/config.toml');
     if (!File.fromUri(manifest).existsSync() ||
-        !File.fromUri(root.resolve('Cargo.toml')).existsSync()) {
-      throw StateError('Archive Rust manifests missing: ${manifest.toFilePath()}');
+        !File.fromUri(root.resolve('Cargo.toml')).existsSync() ||
+        !File.fromUri(cargoConfig).existsSync()) {
+      throw StateError('Archive Rust manifest or build configuration missing: ${manifest.toFilePath()}');
     }
     final buildDirectory = input.outputDirectoryShared.resolve('cargo-target/');
     final result = await Process.run('cargo', [
@@ -54,6 +56,8 @@ Future<void> main(List<String> args) async {
         }
       }
     }
+    // Cargo runs in native/, so it discovers the target-specific CRT policy.
+    output.dependencies.add(cargoConfig);
     output.dependencies.add(native.resolve('include/remvibe_archive.h'));
     output.assets.code.add(CodeAsset(
       package: input.packageName,

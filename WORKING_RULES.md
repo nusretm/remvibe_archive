@@ -11,3 +11,5 @@
 - Future deployment/SFX requirements are recorded in https://github.com/nusretm/remvibe_deployment. They do not change the active roadmap. Installer/Updater evaluation is separate after Archive FFI and before coordinated migration.
 
 - Split Archive wraps the unchanged logical RVA stream in numbered physical parts, with complete-set validation and sibling directory publication. No intermediate complete archive spool. Single remains default. Split is not FileTransfer batching. Buffered extraction remains default; explicit PerFile is available; no equivalent power-loss durability claim.
+
+- Distribution UX: no requirement for end users to install a separate compiler/SDK/runtime/redistributable application. Bundle needed application assets or link eligible native dependencies statically; ordinary supported OS libraries are allowed. Windows private Archive FFI uses static MSVC CRT, with actual release import/runtime acceptance. Inspect final consumers separately; a Rust library cannot control the consuming executable's CRT policy. No new platform or unrelated repo migration implied.
