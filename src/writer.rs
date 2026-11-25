@@ -280,7 +280,8 @@ impl ArchiveWriter {
             }
             Compression::Zstd => {
                 let mut encoder = zstd::stream::write::Encoder::new(&mut *output, self.options.zstd_level).map_err(|e| io_at(&stage, e))?;
-                encoder.window_log(27).map_err(|e| io_at(&stage, e))?;
+                // Known input length lets Zstd choose suitable parameters for small files.
+                encoder.set_pledged_src_size(Some(expected)).map_err(|e| io_at(&stage, e))?;
                 let hash = copy_stream(&mut input, &mut encoder, &mut self.buffer, expected, source, &stage, token, &mut on_chunk)?;
                 encoder.finish().map_err(|e| io_at(&stage, e))?;
                 hash

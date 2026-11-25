@@ -151,7 +151,7 @@ fn main() {
     compressed.truncate(compressed.len() - 2);
     if let EntryKind::File { payload } = &mut manifest.entries[0].entry { payload.stored_size -= 2; }
     assert!(matches!(reader(rebuild(&compressed, &manifest)).verify(), Err(ReaderError::Integrity { .. })));
-    // Restore full zlib stream but declare a smaller output size.
+    // Restore full compressed stream but declare a smaller output size.
     let compressed = &original_compressed;
     if let EntryKind::File { payload } = &mut manifest.entries[0].entry {
         payload.stored_size = compressed.len() as u64;

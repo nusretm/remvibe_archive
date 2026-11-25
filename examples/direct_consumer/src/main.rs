@@ -194,7 +194,7 @@ fn native() -> Result<()> {
 }
 fn benchmark(parent: &Path) -> Result<()> {
     let fixture = Fixture::new(parent)?;
-    println!("BENCH environment os={} arch={} profile={} root={:?} file_bytes={} distribution=half_repeated_half_pseudorandom metadata=default",
+    println!("BENCH environment os={} arch={} profile={} root={:?} file_bytes={} distribution=half_repeated_half_pseudorandom metadata=default manifest=Zstd",
         std::env::consts::OS, std::env::consts::ARCH, if cfg!(debug_assertions) { "debug" } else { "release" }, fixture.0, FILE_BYTES);
     if cfg!(debug_assertions) { return Err("benchmark requires --release".into()); }
     for count in [1000usize, 10000] {
