@@ -1,6 +1,6 @@
 # ARCHIVE-FFI-01 — Dart FFI bindings
 
-Status: A ACCEPTED AND CLOSED on 2026-11-25; B ACCEPTED AND CLOSED; C ACCEPTED AND CLOSED; D ACCEPTED AND CLOSED; E ACCEPTED AND CLOSED; ARCHIVE-FFI-01 A–E ACCEPTED AND CLOSED; fast-forward merged; authorized feature cleanup pending operator Git command. Main integrated at 6b2e978ac899b78305f50ee3ae20ea6cbd3c7d6d.
+Status: A ACCEPTED AND CLOSED on 2026-11-25; B ACCEPTED AND CLOSED; C ACCEPTED AND CLOSED; D ACCEPTED AND CLOSED; E ACCEPTED AND CLOSED; ARCHIVE-FFI-01 A–E ACCEPTED AND CLOSED; fast-forward merged; feature cleanup verified. Main integrated at 6b2e978ac899b78305f50ee3ae20ea6cbd3c7d6d.
 
 ## Goal
 Expose the accepted RVA V3 Rust core to Dart via remvibe_archive_dart at dart/, with a private cdylib crate remvibe_archive_ffi at dart/native/. Keep Rust direct Cargo consumers independent of Dart/FFI. Bind the existing core rather than duplicate archive or FileSystem algorithms.
@@ -127,3 +127,6 @@ Operator explicitly accepted ARCHIVE-FFI-01 A–E and authorized continuity clos
 
 ## Main integration (2026-11-25)
 Verified fast-forward of main from f81c41091e6e39d8a4e504bb81df568ddb9ae434 to 6b2e978ac899b78305f50ee3ae20ea6cbd3c7d6d (42 commits, zero behind; accepted tree 496c1243cb5399d4f8ff76bd705fdabab0c08d9b). GitHub confirmed main and feature/archive-ffi-01 at the same commit after update, no force or new merge commit. This follow-up is documentation only. ARCHIVE-FFI-01 merged and closed; authorized feature cleanup still requires operator Git command because connected GitHub interface does not expose branch deletion. Delete only feature/archive-ffi-01 after confirming its exact merged SHA and ancestry; update local Windows/Ubuntu main by fast-forward, prune local stale remote refs and delete merged local feature branch safely. Preserve docs/uc-filesystem-01-planning and feature/uc-installer-01a-native-nta-reader. Next Installer/Updater architecture evaluation remains separate; no new implementation started.
+
+## Final cleanup verified (2026-11-25)
+Operator Windows and Ubuntu transcripts confirm fast-forward to main abc8d2c1f7873ff04fef876fd8b0cbfedd1696e2, clean working trees and safe deletion of the merged local feature/archive-ffi-01 branches (Windows local source 8cc838e, Ubuntu 3c9856c). Windows remote deletion succeeded with expected feature SHA 6b2e978ac899b78305f50ee3ae20ea6cbd3c7d6d; both pruned stale remote tracking refs. GitHub independently verified only main, docs/uc-filesystem-01-planning (ffac9b64ac76bf5c2a1d8c914e5ca5ce3556f281) and feature/uc-installer-01a-native-nta-reader (b397575b89b2f8cbc572fe67e016781ca3fbc0c0) remain. ARCHIVE-FFI-01 A-E ACCEPTED, MERGED, CLOSED AND CLEANED UP. This final documentation-only commit records cleanup; local main checkouts need only fast-forward to it. Next planned activity: separate Installer/Updater Rust architecture evaluation; no implementation, migration or other repository change authorized.
