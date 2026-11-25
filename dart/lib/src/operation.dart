@@ -58,13 +58,20 @@ Future<void> _nativeReceiver((String?, String, SendPort, String, Object? Functio
   }
 }
 
+abstract interface class ArchiveActiveOperation {
+  Future<dynamic> get result;
+  bool get isRunning;
+  Future<void> cancel();
+}
+
 /// Owns one native operation. Await result even after requesting cancel.
 /// Progress is a broadcast notification stream; subscribe promptly. Terminal
 /// result is authoritative and resolves after the native worker was joined.
-class ArchiveOperation<T> {
+class ArchiveOperation<T> implements ArchiveActiveOperation {
   final String? _library;
   final Future<String> _handle;
   final _progress = StreamController<ArchiveProgress>.broadcast();
+  @override
   late final Future<T> result;
   bool _done = false;
 
@@ -73,8 +80,10 @@ class ArchiveOperation<T> {
   }
 
   Stream<ArchiveProgress> get progress => _progress.stream;
+  @override
   bool get isRunning => !_done;
 
+  @override
   Future<void> cancel() async {
     if (_done) return;
     final handle = await _handle;

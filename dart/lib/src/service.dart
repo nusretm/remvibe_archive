@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'models.dart';
 import 'operation.dart';
+import 'read_operation.dart';
 
 /// One native library configuration per process. Native Assets is default.
 /// An explicit path is useful for diagnostic runs in a separate process.
@@ -135,7 +136,7 @@ class ArchiveReader {
   final String _handle;
   final ArchiveRegion region;
   final BigInt entryCount;
-  ArchiveOperation<dynamic>? _active;
+  ArchiveActiveOperation? _active;
   bool _closing = false;
   Future<void>? _closeFuture;
   ArchiveReader._(this._library, this._handle, this.region, this.entryCount);
@@ -176,6 +177,22 @@ class ArchiveReader {
   }) => _start('reader_extract', {'index': index.toString(),
       'destination': destination.toJson(), 'options': options.toJson()},
       ArchiveExtractResult.fromJson, decodeInReceiver: true);
+
+  /// Read one regular file without extracting it. Single-subscription
+  /// binary chunks remain provisional until result verifies the SHA-256.
+  ArchiveReadOperation readEntry(BigInt index) {
+    if (_closing) {
+      throw ArchiveException.fromJson({
+        'kind': 'closed', 'operation': 'reader_read_entry', 'message': 'Archive reader is closed',
+      });
+    }
+    if (_active?.isRunning == true) {
+      throw const ArchiveBridgeException(ArchiveBridgeErrorKind.busy, 'reader', 'Reader already has an active operation');
+    }
+    final active = startArchiveRead(_library, _handle, index);
+    _active = active;
+    return active;
+  }
 
   /// Cancel/await active work, then release the source and native handle.
   Future<void> close() => _closeFuture ??= _close();

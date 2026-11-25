@@ -37,7 +37,7 @@ class ArchiveNativeBindings {
           'buffer_data', 'buffer_len', 'buffer_free',
           'writer_create', 'writer_add_file', 'writer_add_directory',
           'writer_finish', 'writer_abort', 'writer_close',
-          'reader_open', 'reader_manifest', 'reader_verify', 'reader_extract', 'reader_close']) {
+          'reader_open', 'reader_manifest', 'reader_verify', 'reader_extract', 'reader_close', 'reader_read_entry', 'stream_recv']) {
         if (!library.providesSymbol('$prefix$symbol')) {
           throw StateError('Missing native symbol $prefix$symbol');
         }
@@ -48,7 +48,7 @@ class ArchiveNativeBindings {
     return ArchiveNativeBindings._(library);
   }
 
-  Object? call(String operation, Map<String, Object?>? input) {
+  Uint8List _callBytes(String operation, Map<String, Object?>? input) {
     final free = _library.lookupFunction<Void Function(Pointer<_Buffer>),
         void Function(Pointer<_Buffer>)>('${prefix}buffer_free');
     final length = _library.lookupFunction<Size Function(Pointer<_Buffer>),
@@ -82,6 +82,27 @@ class ArchiveNativeBindings {
     } finally {
       free(result);
     }
+    return copy;
+  }
+
+  Object? call(String operation, Map<String, Object?>? input) =>
+      _decodeEnvelope(operation, _callBytes(operation, input));
+
+  /// One raw binary frame or typed control event. Native buffer already freed.
+  Object? streamReceive(String handle) {
+    const operation = 'stream_recv';
+    final frame = _callBytes(operation, {'handle': handle});
+    if (frame.first == 1 && frame.length > 1 && frame.length <= 256 * 1024 + 1) {
+      return Uint8List.sublistView(frame, 1);
+    }
+    if (frame.first == 0 && frame.length > 1) {
+      return _decodeEnvelope(operation, Uint8List.sublistView(frame, 1));
+    }
+    throw const ArchiveBridgeException(ArchiveBridgeErrorKind.invalidResponse, operation,
+        'Invalid native stream frame');
+  }
+
+  static Object? _decodeEnvelope(String operation, Uint8List copy) {
     late final Object? decoded;
     try {
       decoded = jsonDecode(utf8.decode(copy));
