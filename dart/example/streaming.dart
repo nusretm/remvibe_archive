@@ -153,7 +153,8 @@ Future<void> main(List<String> args) async {
   // A paused large reader does not prevent a second independent reader from
   // streaming. Check all 128 MiB incrementally against the original file.
   final large = await service.openReader(at('large.rva')).result;
-  final other = await service.openReader(at('split.rva.parts')).result;
+  final other = await service.openReader(at('split.rva.parts'),
+      source: const ArchiveSource.split()).result;
   final file = File(join(root, 'source/large.bin')).openSync();
   try {
     final op = large.readEntry(BigInt.zero);
