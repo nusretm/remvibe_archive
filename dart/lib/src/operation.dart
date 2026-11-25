@@ -26,8 +26,8 @@ Future<String> _start(String? library, String operation, Map<String, Object?>? i
 
 /// The receiver owns no native pointer across calls. One event in flight;
 /// credit/stop messages keep the isolate mailbox bounded even during bursts.
-Future<void> _nativeReceiver((String?, String, SendPort) args) async {
-  final (library, handle, output) = args;
+Future<void> _nativeReceiver((String?, String, SendPort, String, Object? Function(Object?)?) args) async {
+  final (library, handle, output, operation, terminalDecoder) = args;
   final credits = ReceivePort();
   final iterator = StreamIterator<dynamic>(credits);
   output.send(credits.sendPort);
@@ -35,6 +35,17 @@ Future<void> _nativeReceiver((String?, String, SendPort) args) async {
     final bindings = ArchiveNativeBindings.load(library);
     while (true) {
       final event = jsonObject(bindings.call('operation_recv', {'handle': handle}));
+      if (event['kind'] == 'terminal' && terminalDecoder != null) {
+        final terminal = ArchiveNativeBindings.unwrap(operation, event['result']);
+        late final Object? decoded;
+        try {
+          decoded = terminalDecoder(terminal);
+        } catch (error) {
+          throw ArchiveBridgeException(ArchiveBridgeErrorKind.invalidResponse, operation, error.toString());
+        }
+        // Transfer the typed large result from this exiting receiver isolate.
+        Isolate.exit(output, ['decoded', decoded]);
+      }
       output.send(event);
       if (event['kind'] == 'terminal') break;
       if (!await iterator.moveNext() || iterator.current != true) break;
@@ -57,8 +68,8 @@ class ArchiveOperation<T> {
   late final Future<T> result;
   bool _done = false;
 
-  ArchiveOperation._(this._library, this._handle, String operation, T Function(Object?) decode) {
-    result = _receive(operation, decode);
+  ArchiveOperation._(this._library, this._handle, String operation, T Function(Object?) decode, bool decodeInReceiver) {
+    result = _receive(operation, decode, decodeInReceiver);
   }
 
   Stream<ArchiveProgress> get progress => _progress.stream;
@@ -71,7 +82,7 @@ class ArchiveOperation<T> {
     await callArchiveNative(_library, 'operation_cancel', {'handle': handle});
   }
 
-  Future<T> _receive(String operation, T Function(Object?) decode) async {
+  Future<T> _receive(String operation, T Function(Object?) decode, bool decodeInReceiver) async {
     String? handle;
     ReceivePort? port;
     SendPort? credits;
@@ -80,13 +91,17 @@ class ArchiveOperation<T> {
       final receiver = ReceivePort();
       port = receiver;
       await Isolate.spawn(
-        _nativeReceiver, (_library, handle, receiver.sendPort),
+        _nativeReceiver, (_library, handle, receiver.sendPort, operation,
+          decodeInReceiver ? decode as Object? Function(Object?) : null),
         onError: receiver.sendPort, onExit: receiver.sendPort,
       );
       await for (final message in receiver) {
         if (message is SendPort) {
           credits = message;
           continue;
+        }
+        if (message is List && message.length == 2 && message.first == 'decoded') {
+          return message[1] as T;
         }
         if (message is List && message.length == 2 && message.first == 'nativeError') {
           throw message[1] as Object;
@@ -131,5 +146,6 @@ class ArchiveOperation<T> {
 }
 
 ArchiveOperation<T> startArchiveOperation<T>(
-    String? library, String operation, Map<String, Object?>? input, T Function(Object?) decode) =>
-    ArchiveOperation._(library, _start(library, operation, input), operation, decode);
+    String? library, String operation, Map<String, Object?>? input, T Function(Object?) decode,
+    {bool decodeInReceiver = false}) =>
+    ArchiveOperation._(library, _start(library, operation, input), operation, decode, decodeInReceiver);

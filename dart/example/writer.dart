@@ -98,7 +98,8 @@ Future<void> main(List<String> args) async {
             result.physicalBytes == BigInt.from(File(destination).lengthSync()), 'Wrong Single accounting');
       }
       require(events.isNotEmpty && events.last.phase == ArchiveProgressPhase.completed, 'Missing completed phase');
-      for (final phase in ArchiveProgressPhase.values) {
+      for (final phase in [ArchiveProgressPhase.preparing, ArchiveProgressPhase.writing,
+          ArchiveProgressPhase.entryCompleted, ArchiveProgressPhase.finalizing, ArchiveProgressPhase.completed]) {
         require(events.any((event) => event.phase == phase), 'Missing phase ${phase.name}');
       }
       require(events.where((e) => e.phase == ArchiveProgressPhase.entryCompleted).length == 10, 'Entry progress missing');

@@ -31,6 +31,20 @@ class ArchiveService {
     {'destination': destination.toJson(), 'options': options.toJson()},
     (value) => ArchiveWriter._(_libraryPath, archiveHandle(value, 'writer_create')),
   );
+
+  /// Open and validate the manifest. Payload integrity requires verify or read.
+  /// The caller must keep the source immutable for the lifetime of the Reader.
+  ArchiveOperation<ArchiveReader> openReader(
+    ArchiveNativePath path, {
+    ArchiveSource source = const ArchiveSource.single(),
+    ArchiveReaderOptions options = const ArchiveReaderOptions(),
+  }) => startArchiveOperation(
+    _libraryPath, 'reader_open',
+    {'path': path.toJson(), 'source': source.toJson(), 'options': options.toJson()},
+    (value) => ArchiveReader._(_libraryPath, archiveHandle(value, 'reader_open'),
+        ArchiveRegion.fromJson(jsonObject(value)['region']),
+        BigInt.parse(jsonObject(value)['entryCount'] as String)),
+  );
 }
 
 /// One Core writer, one active command. Independent writers may run together.
@@ -109,6 +123,75 @@ class ArchiveWriter {
       }
     } finally {
       await callArchiveNative(_library, 'writer_close', {'handle': _handle});
+    }
+  }
+}
+
+
+/// Owns one validated Core reader. Commands are serialized per handle;
+/// cancellation is one-way: close and reopen before further work.
+class ArchiveReader {
+  final String? _library;
+  final String _handle;
+  final ArchiveRegion region;
+  final BigInt entryCount;
+  ArchiveOperation<dynamic>? _active;
+  bool _closing = false;
+  Future<void>? _closeFuture;
+  ArchiveReader._(this._library, this._handle, this.region, this.entryCount);
+
+  ArchiveOperation<T> _start<T>(String operation, Map<String, Object?> fields,
+      T Function(Object?) decode, {bool decodeInReceiver = false}) {
+    if (_closing) {
+      throw ArchiveException.fromJson({
+        'kind': 'closed', 'operation': operation, 'message': 'Archive reader is closed',
+      });
+    }
+    if (_active?.isRunning == true) {
+      throw const ArchiveBridgeException(ArchiveBridgeErrorKind.busy, 'reader', 'Reader already has an active operation');
+    }
+    final active = startArchiveOperation<T>(_library, operation, {'handle': _handle, ...fields}, decode,
+        decodeInReceiver: decodeInReceiver);
+    _active = active;
+    return active;
+  }
+
+  /// Typed, immutable snapshot of the validated manifest. No payload reads.
+  ArchiveOperation<ArchiveManifest> manifest() =>
+      _start('reader_manifest', {}, ArchiveManifest.fromJson, decodeInReceiver: true);
+
+  /// Verify all payload lengths and SHA-256 without writing output.
+  ArchiveOperation<ArchiveReadResult> verify() =>
+      _start('reader_verify', {}, ArchiveReadResult.fromJson);
+
+  /// Extract into an absent directory, without merge/overwrite.
+  ArchiveOperation<ArchiveExtractResult> extractTo(ArchiveNativePath destination, {
+    ArchiveExtractOptions options = const ArchiveExtractOptions(),
+  }) => _start('reader_extract', {'destination': destination.toJson(), 'options': options.toJson()},
+      ArchiveExtractResult.fromJson, decodeInReceiver: true);
+
+  /// Extract one regular file to an explicit absent filename.
+  ArchiveOperation<ArchiveExtractResult> extractEntryTo(BigInt index, ArchiveNativePath destination, {
+    ArchiveExtractOptions options = const ArchiveExtractOptions(),
+  }) => _start('reader_extract', {'index': index.toString(),
+      'destination': destination.toJson(), 'options': options.toJson()},
+      ArchiveExtractResult.fromJson, decodeInReceiver: true);
+
+  /// Cancel/await active work, then release the source and native handle.
+  Future<void> close() => _closeFuture ??= _close();
+  Future<void> _close() async {
+    _closing = true;
+    final active = _active;
+    try {
+      if (active != null && active.isRunning) {
+        final wait = active.result.then<void>((_) {}, onError: (Object error, StackTrace stack) {
+          if (error is ArchiveException && error.kind != ArchiveErrorKind.cleanup) return;
+          Error.throwWithStackTrace(error, stack);
+        });
+        await Future.wait<void>([wait, active.cancel()]);
+      }
+    } finally {
+      await callArchiveNative(_library, 'reader_close', {'handle': _handle});
     }
   }
 }

@@ -36,7 +36,8 @@ class ArchiveNativeBindings {
           'operation_recv', 'operation_cancel', 'operation_close',
           'buffer_data', 'buffer_len', 'buffer_free',
           'writer_create', 'writer_add_file', 'writer_add_directory',
-          'writer_finish', 'writer_abort', 'writer_close']) {
+          'writer_finish', 'writer_abort', 'writer_close',
+          'reader_open', 'reader_manifest', 'reader_verify', 'reader_extract', 'reader_close']) {
         if (!library.providesSymbol('$prefix$symbol')) {
           throw StateError('Missing native symbol $prefix$symbol');
         }
