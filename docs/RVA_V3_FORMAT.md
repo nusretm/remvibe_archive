@@ -44,3 +44,20 @@ Reader uses a bounded owned source, validates manifest on open, verifies each pa
 ## E revision (unreleased, incompatible with A–D artifacts)
 
 Header stays 16 bytes/version 3; new distinct footer magic rejects older unpublished footer. Manifest remains last, stored as None/Zlib/Zstd, defaults Zstd. Both stored and original lengths independently bounded by max_manifest_bytes before allocation; exact original JSON digest and length validated after decode. None requires equal lengths. Exactly one full compression stream, no trailing or concatenated frames, no external dictionaries or skippable Zstd frames. Zstd decoder window capped at 128 MiB; supported writer levels 1–19. File payloads stay independent and bounded. No solid compression, encryption, multithreading or split format changes in E. Buffered extraction is the operator-approved default; PerFile remains explicitly selectable. Integrity/publication distinct from power-loss durability. Do not use pre-E generated RVA files with E; regenerate cross-OS fixtures. E accepted and closed on 2026-11-25: Windows/Ubuntu runtime probes, benchmarks, actual bidirectional E-format exchange and focused Buffered-default acceptance PASS. F remains separate.
+
+## F physical split envelope (in progress)
+
+The inner logical RVA byte stream is exactly the E layout above. No changes to its header, payload offsets, manifest or footer. The split set is an absent destination directory (recommended suffix .rva.parts), containing exactly part.000001 through part.NNNNNN. Directory may be renamed as a unit. Each physical file begins with this fixed 72-byte envelope, all integers big endian:
+
+| Offset | Length | Value |
+|---|---|---|
+| 0 | 8 | RVASPL3 followed by LF |
+| 8 | 32 | SHA-256 of complete logical RVA bytes, shared set identity |
+| 40 | 8 | one-based part index |
+| 48 | 8 | total part count |
+| 56 | 8 | total logical RVA length |
+| 64 | 8 | logical payload capacity per part (max physical size minus 72) |
+
+max_part_size must exceed 72. Capacity and total nonzero; count = 1 + (total - 1) / capacity, at most 999999 (six-digit names). Each nonfinal part has exactly capacity bytes after the envelope; last has the positive remainder, possibly full capacity. Physical bytes = logical length + count * 72, checked u64 arithmetic. No extra empty last part. Explicit Split can have one part. Header/manifest/footer and any compressed file may cross boundaries. Every part must match the first part's identity/total/count/capacity and its expected index and physical length; all expected names must exist and extra entries are rejected. The shared digest is computed during writer streaming and used as set identity, not an independent full-stream read on open; existing logical manifest and payload SHA-256 verify content on demand. Not publisher authentication. Caller keeps set immutable. Parts opened sequentially for header validation, one cached read handle during seek/read, no concatenation file or open-all handle requirement.
+
+Writer writes envelopes as placeholders in a private sibling staging directory, streams payload bytes directly into bounded parts, finalizes headers after inner footer, syncs each part, closes handles, then uses one shared FileSystem no-replace directory rename. On normal failure/cancel cleans staging; cleanup errors reported. No crash-recovery promise, no independent publication of individual sibling files. Publication directory choice is an F implementation decision to preserve set-level atomic visibility. Physical split files can be transferred independently but must be reunited in one directory before opening. No split-resume editing/repair, no independent per-part extraction, no changes to FileTransfer batching or SFX.

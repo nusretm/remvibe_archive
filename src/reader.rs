@@ -47,7 +47,12 @@ impl fmt::Display for ReaderError {
     }
 }
 impl Error for ReaderError {}
-impl From<io::Error> for ReaderError { fn from(e: io::Error) -> Self { Self::Io(e) } }
+impl From<io::Error> for ReaderError {
+    fn from(e: io::Error) -> Self {
+        if e.get_ref().is_some_and(|inner| inner.is::<crate::split::SplitCancelled>()) { Self::Cancelled }
+        else { Self::Io(e) }
+    }
+}
 impl From<FormatError> for ReaderError { fn from(e: FormatError) -> Self { Self::Format(e) } }
 impl From<ManifestError> for ReaderError { fn from(e: ManifestError) -> Self { Self::Manifest(e) } }
 impl From<PathCodecError> for ReaderError { fn from(e: PathCodecError) -> Self { Self::Path(e) } }

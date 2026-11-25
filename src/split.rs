@@ -22,7 +22,7 @@ fn invalid(message: &'static str) -> io::Error {
 #[derive(Debug)]
 pub(crate) struct SplitCancelled;
 impl fmt::Display for SplitCancelled {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str("split archive creation cancelled") }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str("split archive operation cancelled") }
 }
 impl Error for SplitCancelled {}
 fn check_write(token: &CancellationToken) -> io::Result<()> {
@@ -186,6 +186,7 @@ pub struct SplitReader {
     header: PartHeader,
     position: u64,
     active: Option<(u64, File)>,
+    cancellation: CancellationToken,
 }
 impl SplitReader {
     pub fn open(directory: &Path, cancellation: &CancellationToken) -> Result<Self, ReaderError> {
@@ -208,7 +209,7 @@ impl SplitReader {
             open_part(&dir, index, Some(header))?;
         }
         check_read(cancellation)?;
-        Ok(Self { dir, header, position: 0, active: None })
+        Ok(Self { dir, header, position: 0, active: None, cancellation: cancellation.clone() })
     }
     pub fn part_count(&self) -> u64 { self.header.count }
     pub fn logical_length(&self) -> u64 { self.header.total }
@@ -217,6 +218,7 @@ impl SplitReader {
 }
 impl Read for SplitReader {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        check_write(&self.cancellation)?;
         if bytes.is_empty() || self.position >= self.header.total { return Ok(0); }
         let index = self.position / self.header.capacity + 1;
         let inside = self.position % self.header.capacity;
