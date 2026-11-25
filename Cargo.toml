@@ -1,0 +1,10 @@
+[package]
+name = "remvibe_archive"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["rlib"]
+
+# Dependencies added when used in the remaining foundation checkpoint.

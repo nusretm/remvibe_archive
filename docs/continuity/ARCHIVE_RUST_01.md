@@ -1,27 +1,27 @@
-# ARCHIVE-RUST-01 — approved planning scope
+# ARCHIVE-RUST-01 — RVA V3
 
-Updated: 2026-11-24. Planned only. Source baseline inspected: main e38c10792d71299601b147a39700ed0e9ab2d51a. Recheck HEAD at implementation start.
+2026-11-25. Revised direction supersedes NTA V2/V3 planning. Repository baseline cb444eb41fdac0cbb77502e42d51dc26eb21d495; FileSystem accepted baseline 3942a39bbdecf84144709e899b986fe19c6b8c06. User approved manifest-last, no legacy compatibility, legacy isolation, standalone root Rust package remvibe_archive and future dart/ package remvibe_archive_dart with native/ FFI. Embedded region reader and entry streaming support future deployment/SFX without coupling to them. Initial no-encryption/no-link profile follows the proposed bounded checkpoint; future support separately reviewed.
 
-## Goal
+## Checkpoints
 
-Provide an independent Rust core reader/writer for the existing NTA V2 unencrypted profile, statically consumable by Rust applications and usable by higher-level transfer libraries. Preserve the existing Dart reader/writer and C++ reader. No NTA V3 or format change.
+A — Repository and format foundation: exact legacy preservation, root Rust package, format definition, fixed envelope and manifest models/validation, native path and metadata serialization using FileSystem models, focused Windows/Linux compilation and examples. Current first increment covers layout and envelope/bounds only. Remaining models, validation, dependency lock and platform evidence still open.
 
-## Scope
+B — Writer: selected regular files and recursive/nonrecursive directories, empty entries, streaming zlib/none and SHA-256, one sibling temp archive and manifest-last publication, source-change checks, cancellation and progress. No extra payload spool or transfer grouping.
 
-- Existing NTA V2 envelope/manifest, big-endian integers, relative POSIX archive paths, contiguous payload ranges, zlib and none, per-file SHA-256, streaming read/write.
-- Regular files, directories, empty files/directories, UTC modification times and supported POSIX permissions; honor the established critical metadata rules, including explicit errors for unsupported critical metadata and setuid/setgid rejection.
-- Selected source files with explicit archive-relative paths; nonrecursive directory entry support so callers can exclude large files while retaining correct parents and empty directories. Archive batching/classification belongs to the caller, not this library.
-- Real preparation/compression/extraction progress events and lifecycle/cleanup suitable for cancellation; exact Rust API and dependency choices reviewed at implementation.
-- Preserve existing path, collision, size-limit, integrity and staging extraction contracts in docs/NTA_V2_FORMAT.md. Extract to an absent destination via sibling staging; do not introduce merge/overwrite or transfer finalization logic.
-- No encrypted NTA support in this initial Rust profile. Symbolic link support/policy remains an explicit checkpoint decision; do not silently omit entries. Unsupported entries/metadata fail explicitly. Existing deferred NTA features remain deferred.
+C — Reader: bounded Read+Seek (path, memory, file region), manifest integrity and bounds, list and stream selected entries, full extraction with per-entry size/hash verification, target collisions and sibling staging, metadata via shared FileSystem policy (dirs last), cleanup/reporting. No overwrite/merge/source deletion. Do not trust embedded metadata as publisher authorization.
 
-## Acceptance
+D — Real Windows/Linux round trip, portable-name cross-platform archives, native names and metadata, direct Cargo consumer, many small files measurements; focused negative cases. macOS design only. Update continuity, obtain explicit merge/cleanup approval.
 
-- Rust-to-Rust round trip; Dart-to-Rust and Rust-to-Dart round trips for the common supported profile; Rust-to-C++ extraction for its existing supported profile (including its metadata/platform restrictions).
-- Both zlib and none, empty entries, selected-file packaging, nonrecursive directories, streaming larger-than-buffer content, supported metadata and real progress.
-- Preserve format validation, corruption/limit/path rejection and staging cleanup on errors. Focused checks only; no unrelated test or CI expansion.
-- Real Windows/Linux acceptance with actual evidence; macOS design compatibility only. Existing Dart/C++ behavior unchanged. Do not claim unexecuted tests or builds.
+## Consumer inspection before legacy relocation
 
-## Non-goals
+Known remvibe_update_center main dependencies verified from source:
+- root pubspec.yaml and ci/draft_packager/pubspec.yaml pin c380c637f5db4d64ec1da41ee5c34615963ef412 (old package root); matching lockfiles, fleet_console transitive lock also pinned.
+- installer/CMakeLists.txt FetchContent pins e38c10792d71299601b147a39700ed0e9ab2d51a, SOURCE_SUBDIR native, checks resolved revision. Optional REMVIBE_ARCHIVE_NATIVE_SOURCE_DIR local override must point to old checkout native/ or new _legacy/native/ after relocation. Actual local overrides/other unindexed consumers not verified; confirm before main migration/merge. No changes to these consumers in this checkpoint.
+- Old CI workflow moved with legacy tree, not active in new root; no replacement CI added. Historical acceptance retained in _legacy/docs/UC3_CHECKPOINT.md.
+- Archive draft docs PR #4 was older NTA V3 working-name revision; this feature's active documentation supersedes it, do not merge old text unchanged.
 
-No replacement of existing implementations, new archive format, encrypted Rust profile, installer/updater work, network transport, filesystem manager, file transfer orchestration, UI, FFI framework or unrelated CI/security work. A subsequent caller may consume the Rust crate directly; no standalone archive DLL is required by this checkpoint.
+## Design boundaries
+
+Reuse remvibe_filesystem_core as direct pinned Cargo library; no FileSystem FFI. Serialization belongs to Archive; OS operations/metadata application belong to FileSystem. If existing public API is insufficient, report precise dependency gap and obtain approval for a bounded shared fix. No product-specific settings, UI, networking, deployment or SFX implementation here. FFI and Dart package developed together in ARCHIVE-FFI-01. No separate FFI product. Existing Dart/C++ maintained only via legacy revisions until coordinated migration. Deployment plans: https://github.com/nusretm/remvibe_deployment.
+
+Actual validation: Git source and dependency inspection only before initial commit; Windows/Linux builds/probes not yet run. No acceptance or closure claimed.
