@@ -10,7 +10,7 @@ B — Writer: selected regular files and recursive/nonrecursive directories, emp
 
 C — Reader: bounded Read+Seek (path, memory, file region), manifest integrity and bounds, list and stream selected entries, full extraction with per-entry size/hash verification, target collisions and sibling staging, metadata via shared FileSystem policy (dirs last), cleanup/reporting. No overwrite/merge/source deletion. Do not trust embedded metadata as publisher authorization. C accepted and closed 2026-11-25; see evidence below.
 
-D — Real Windows/Linux round trip, portable-name cross-platform archives, native names and metadata, direct Cargo consumer, many small files measurements; focused negative cases. macOS design only. Update continuity, obtain explicit merge/cleanup approval.
+D — Real Windows/Linux round trip, portable-name cross-platform archives, native names and metadata, direct Cargo consumer, many small files measurements; focused negative cases. macOS design only. Functional and measured acceptance passed 2026-11-25; explicit merge/cleanup approval pending.
 
 ## Consumer inspection before legacy relocation
 
@@ -43,3 +43,24 @@ Focused reader_probe covers writer-generated archive, file/memory/embedded regio
 ## Checkpoint D implementation — 2026-11-25
 
 Operator authorized D. Independent examples/direct_consumer package depends only on remvibe_archive by relative Cargo path (no FFI or direct FileSystem dependency). Separate consumer lock derived from accepted root lock by adding its local package entry, to be validated by actual --locked build. No change to root Cargo.toml/Cargo.lock, engine, legacy or other repositories. Commands: `produce <archive>` creates persistent portable RVA with origin OS marker, Zlib and None, Unicode, nested/empty dirs and empty file; `consume <archive> <other-os>` checks origin differs from current OS, extracts, compares fixture bytes/mtime and validates metadata application result. Transfer actual produced archives across OSs; no simulated exchange. `native` writes actual raw Unix filename byte FF or Windows lone UTF-16 surrogate, verifies exact native name after extraction, bytes and fixed mtime; Unix required executable mode or Windows required readonly; Full metadata capture and Windows ACL BestEffort result reported (not an exact ACL requirement). Native filesystem inability to create a raw name must be reported, not silently replaced. `bench [existing-work-dir]` measures Release only, 1,000/10,000 x 4 KiB files in directories of 100, half compressible and half deterministic pseudorandom, default metadata, Zlib/None; includes writer construction/finish and reader open/extract with integrity checks, metadata and sync/publication; fixture creation, byte comparison and cleanup excluded. Archive/source percentage and files/s reported. Default temp directory or operator-selected existing directory; device/cache/antivirus may affect results, one run per scenario, no benchmark target or claimed speedup. Fixtures created in unique disposable directories; portable archive kept at explicit absent destination. Root lock and engine unchanged. Runtime validation pending on Windows/Linux. Main merge, superseded docs PR disposition and cleanup require separate approval. macOS design only, FFI and Deployment not started.
+
+## Checkpoint D acceptance — 2026-11-25
+
+Operator transcripts at HEAD 6569dc5ff839979421058cffe8e320c619200ef0: Windows and Ubuntu x86_64 root cargo check --locked, independent direct consumer --locked Release build, native and benchmark PASS, clean git status --short, no reported compiler warnings/errors. Actual raw Windows UTF-16 surrogate name and Linux non-Unicode byte FF name restored; bytes and mtime verified. Windows ModifiedTime, Readonly and WindowsAcl Applied (ACL BestEffort for this fixture), PosixMode Unsupported/nonfatal. Ubuntu ModifiedTime and PosixMode Applied. Not universal ACL equivalence. Actual portable archive exchange: Windows produced 7 entries, 4130 source bytes, 12666 archive bytes; Ubuntu consumed 7 entries/4130 output bytes PASS. Linux produced 7 entries, 4128 source bytes, 8100 archive bytes; Windows consumed 7 entries/4128 output bytes PASS. Unicode, empty entries, mtime and content verified.
+
+### Measured Release benchmarks
+
+4 KiB/file, half repeated/half deterministic pseudorandom, default metadata, repository volumes, one run per scenario. Times ms; archive % is archive/source bytes x 100. Includes integrity, sync, metadata, publication; excludes fixture creation, external byte comparison and cleanup.
+
+| OS | Files | Compression | Source bytes | Archive bytes | Pack ms | Extract ms | Archive % | Pack files/s | Extract files/s |
+|---|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| Windows | 1000 | Zlib | 4096000 | 2694497 | 2361.895 | 2047.424 | 65.78 | 423.39 | 488.42 |
+| Windows | 1000 | None | 4096000 | 4725143 | 291.456 | 1916.645 | 115.36 | 3431.05 | 521.75 |
+| Windows | 10000 | Zlib | 40960000 | 26964654 | 4631.176 | 19457.852 | 65.83 | 2159.28 | 513.93 |
+| Windows | 10000 | None | 40960000 | 47267290 | 3245.058 | 19920.309 | 115.40 | 3081.61 | 502.00 |
+| Ubuntu | 1000 | Zlib | 4096000 | 2746646 | 242.519 | 2261.346 | 67.06 | 4123.39 | 442.21 |
+| Ubuntu | 1000 | None | 4096000 | 4776961 | 113.762 | 2205.926 | 116.63 | 8790.25 | 453.32 |
+| Ubuntu | 10000 | Zlib | 40960000 | 27471872 | 1757.083 | 21543.269 | 67.07 | 5691.25 | 464.18 |
+| Ubuntu | 10000 | None | 40960000 | 47773708 | 930.625 | 19952.395 | 116.64 | 10745.47 | 501.19 |
+
+All extracted bytes verified. Extraction 19.5–21.5 seconds for 10000 files, 464–514 files/s; per-file sync_all and metadata application plausible contributors, not profiled causes. None archive overhead 15–17%; Zlib archive about 66–67% of original bytes. Windows 1000-file Zlib rate anomalous compared to 10000; no attribution without profiling/repetition. No agreed speed threshold or speedup claim versus legacy/direct transfer. No optimization initiated. A–D acceptance complete; formal merge/cleanup pending explicit approval. Root source tree 5020ac755ed50799cb73bc600450ac9d15dfa98e, lock ab7e42a58b181e795226c4ffdc5a7c212545d107, main cb444eb41fdac0cbb77502e42d51dc26eb21d495 and legacy tree 9e578dc48bb8971c2d178b5c96bb8c1993248c4c preserved. Known legacy consumers pinned; local overrides/unindexed consumers not verified. Superseded archive draft PR #4 must not be merged unchanged. No macOS runtime or FFI implementation.
