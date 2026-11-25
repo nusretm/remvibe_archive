@@ -107,8 +107,20 @@ impl PathComponent {
             if name.encode_wide().any(|c| matches!(c, 0..=31 | 34 | 42 | 58 | 60 | 62 | 63 | 124)) {
                 return Err(PathCodecError("invalid Windows target name"));
             }
-            // Actual device aliases/trailing-dot/space and filesystem collisions
-            // must additionally be handled at extraction before opening files.
+            let units: Vec<u16> = name.encode_wide().collect();
+            if matches!(units.last(), Some(32 | 46)) {
+                return Err(PathCodecError("Windows target name ends in space or dot"));
+            }
+            // Check reserved device stems, including Win32 superscript digits.
+            // Lossy text is used ONLY for rejecting reserved names, never to
+            // construct the actual path or change native code units.
+            let display = String::from_utf16_lossy(&units);
+            let stem = display.split('.').next().unwrap_or("").trim_end_matches(' ').to_ascii_uppercase();
+            if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$")
+                || stem.strip_prefix("COM").or_else(|| stem.strip_prefix("LPT"))
+                    .is_some_and(|n| matches!(n, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³")) {
+                return Err(PathCodecError("reserved Windows target device name"));
+            }
         }
         Ok(name)
     }
