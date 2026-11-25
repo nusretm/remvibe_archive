@@ -7,4 +7,9 @@ publish = false
 [lib]
 crate-type = ["rlib"]
 
-# Dependencies added when used in the remaining foundation checkpoint.
+[dependencies]
+remvibe_filesystem_core = { git = "https://github.com/nusretm/remvibe_filesystem.git", rev = "3942a39bbdecf84144709e899b986fe19c6b8c06" }
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
