@@ -1,0 +1,10 @@
+name: remvibe_archive_dart
+description: Dart FFI adapter for the RemVibe RVA V3 native archive core.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: '>=3.14.0 <4.0.0'
+dependencies:
+  ffi: ^2.2.0
+  hooks: ^2.2.0
+  code_assets: ^2.2.0
