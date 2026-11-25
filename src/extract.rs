@@ -16,7 +16,7 @@ pub struct ExtractOptions {
     pub sync: ExtractionSync,
 }
 impl Default for ExtractOptions {
-    fn default() -> Self { Self { metadata_policy: Some(MetadataPolicy::default()), sync: ExtractionSync::PerFile } }
+    fn default() -> Self { Self { metadata_policy: Some(MetadataPolicy::default()), sync: ExtractionSync::Buffered } }
 }
 #[derive(Debug)]
 pub struct EntryMetadataResult {
