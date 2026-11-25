@@ -1,6 +1,6 @@
 # ARCHIVE-FFI-01 — Dart FFI bindings
 
-Status: A ACCEPTED AND CLOSED on 2026-11-25; B ACCEPTED AND CLOSED; C TECHNICAL ACCEPTANCE COMPLETE; D awaiting explicit operator authorization; E gated. Main verified f81c41091e6e39d8a4e504bb81df568ddb9ae434.
+Status: A ACCEPTED AND CLOSED on 2026-11-25; B ACCEPTED AND CLOSED; C ACCEPTED AND CLOSED; D AUTHORIZED; E gated. Main verified f81c41091e6e39d8a4e504bb81df568ddb9ae434.
 
 ## Goal
 Expose the accepted RVA V3 Rust core to Dart via remvibe_archive_dart at dart/, with a private cdylib crate remvibe_archive_ffi at dart/native/. Keep Rust direct Cargo consumers independent of Dart/FFI. Bind the existing core rather than duplicate archive or FileSystem algorithms.
@@ -23,8 +23,8 @@ Accepted source HEAD 1a07cc6d5f993ca18314fd78c10449c89ec63ca0, accepted source t
 ## Checkpoints
 - A (accepted and closed): private FFI crate and Dart package, ABI v1/header/buffer, native path codec, errors, loading, generic handle/operation substrate, focused foundation probe on Windows/Ubuntu with locked build/analyze and default/explicit native loading. No writer/reader functions.
 - B (accepted and closed): Writer Single/Split, recursive/nonrecursive and per-file codec, options, progress/cancel, finish/abort/cleanup, real Dart creation and Rust interoperability; heartbeat during work.
-- C (technical PASS): Reader Single/Split/Embedded, manifest, verify, full/selected extraction, Buffered/PerFile, metadata, integrity/error/progress/cancel.
-- D (pending): selected-entry binary streaming, bounded delivery, pause/resume/cancel, lifecycle and concurrent independent operations.
+- C (accepted and closed): Reader Single/Split/Embedded, manifest, verify, full/selected extraction, Buffered/PerFile, metadata, integrity/error/progress/cancel.
+- D (authorized): selected-entry binary streaming, bounded delivery, pause/resume/cancel, lifecycle and concurrent independent operations.
 - E (pending): integrated locked Windows/Linux runtime, both library modes, bidirectional actual Dart Single/Split exchange, clean automatic native build via existing Dart build hook without prebuilt FFI library or manual Cargo build, bundled CLI runtime and native linkage inspection, direct Rust consumer regression. Separate merge/cleanup approval.
 Each checkpoint requires continuity evidence, actual Windows/Linux acceptance and explicit authorization before next. No UI automation, speculative tests or CI.
 
@@ -73,3 +73,6 @@ Operator retest at exact HEAD d43b09f36f733d44aec74b853954b7fc55b2cea7, clean wo
 
 ## Checkpoint C — final technical closure (2026-11-25)
 Ubuntu operator at exact HEAD 32b879e632c6a001c0c54ef39db31f8ab010aabd, clean before/after. GitHub verified this is documentation-only successor of Windows corrected-probe HEAD d43b09f36f733d44aec74b853954b7fc55b2cea7; identical production source, probe and dependency locks. Root locked check 0.04s, private all-target locked check 0.63s, locked debug build 1.71s; no reported warnings/errors. Dart locked pub get and analyze No issues found; A foundation Native Assets and explicit SO both PASS. B Writer Native Assets regression all markers PASS, Single logical/physical 99294 bytes (1 part), Split logical 99437/physical 101237 bytes (25 parts), active cancel heartbeat 45 ticks; independent Rust Writer verifier all PASS. C Rust fixture prepared with embedded offset 37, length 99304 bytes and actual raw native name. Dart Reader Native Assets Single/Split/Embedded manifest/verify/extract PASS each 10 entries/98338 output bytes; selected metadata policies/errors and format/limits/integrity/cleanup PASS. Active cancel PASS ticks=3 eventLoopHeartbeat=PASS; active close PASS ticks=1 eventLoopHeartbeat=PASS; cancel/reopen/cleanup and ARCHIVE_FFI_C_READER_COMPLETED mode=nativeAssets os=linux PASS. Independent native disk verifier raw filenames, extracted content, timestamps, metadata and staging cleanup PASS. Both platforms technical PASS; previous Windows probe-only correction retained, no production correction required. Await explicit C acceptance and D authorization. D binary selected-entry streaming, bounded credit/backpressure, pause/resume/cancel, lifecycle and independent handles remain gated. E full integrated explicit library, clean automatic Dart hook build without prebuilt native library, bundled release runtime, linkage inspection, actual bidirectional Dart exchange and direct Rust consumer regression remain gated. No macOS runtime, opaque ACE-specific fixture, paging or large-scale manifest stress claim. No merge or branch cleanup.
+
+## Checkpoint D authorization (2026-11-25)
+Operator explicitly accepted C and authorized D only: selected regular file binary streaming, bounded pull credit, pause/resume/cancel, SHA-256 terminal verification, independent reader handles and deterministic cleanup. Preserve Core, format, all lockfiles and A/B/C behavior. E final integration, clean automatic build hook and release distribution remain gated; no merge/cleanup.
