@@ -4,7 +4,7 @@
 
 ## Checkpoints
 
-A — Repository and format foundation: exact legacy preservation, root Rust package, format definition, fixed envelope and manifest models/validation, native path and metadata serialization using FileSystem models, focused Windows/Linux compilation and examples. Current first increment covers layout and envelope/bounds only. Remaining models, validation, dependency lock and platform evidence still open.
+A — Repository and format foundation: exact legacy preservation, root Rust package, format definition, fixed envelope and manifest models/validation, native path and metadata serialization using FileSystem models, focused Windows/Linux compilation and examples. Layout, envelope/bounds, manifest, native path and metadata codec sources committed. Expanded probe, dependency lock and platform acceptance remain open.
 
 B — Writer: selected regular files and recursive/nonrecursive directories, empty entries, streaming zlib/none and SHA-256, one sibling temp archive and manifest-last publication, source-change checks, cancellation and progress. No extra payload spool or transfer grouping.
 
@@ -24,4 +24,4 @@ Known remvibe_update_center main dependencies verified from source:
 
 Reuse remvibe_filesystem_core as direct pinned Cargo library; no FileSystem FFI. Serialization belongs to Archive; OS operations/metadata application belong to FileSystem. If existing public API is insufficient, report precise dependency gap and obtain approval for a bounded shared fix. No product-specific settings, UI, networking, deployment or SFX implementation here. FFI and Dart package developed together in ARCHIVE-FFI-01. No separate FFI product. Existing Dart/C++ maintained only via legacy revisions until coordinated migration. Deployment plans: https://github.com/nusretm/remvibe_deployment.
 
-Actual validation: Git source and dependency inspection only before initial commit; Windows/Linux builds/probes not yet run. No acceptance or closure claimed.
+Actual validation: operator reported Windows and Ubuntu cargo check and foundation_probe PASS at exact HEAD fe2ce8e349249b4f6aa2169d75497bac7ba8a293. Expanded foundation adds pinned remvibe_filesystem_core, base64, serde, serde_json and sha2; no compression dependency until B. Expanded build and manifest_probe not yet run. Cargo.lock must be resolved in authorized environment, recorded and committed before A closure. No full A acceptance or merge claimed.
