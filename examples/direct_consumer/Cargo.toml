@@ -1,0 +1,8 @@
+[package]
+name = "remvibe_archive_acceptance"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+remvibe_archive = { path = "../.." }
