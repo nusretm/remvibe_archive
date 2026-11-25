@@ -7,6 +7,7 @@ mod writer;
 mod reader;
 mod extract;
 mod codec;
+mod split;
 
 pub use format::{ArchiveRegion, Footer, FormatError, Header, FOOTER_LEN, HEADER_LEN, VERSION};
 pub use manifest::{ArchiveEntry, ArchiveManifest, Compression, EntryKind, FilePayload, ManifestError, ManifestLimits};
@@ -16,3 +17,4 @@ pub use writer::{ArchiveWriter, CancellationToken, MetadataCapture, WriterError,
 pub use reader::{ArchiveReader, ReaderError, ReaderOptions, ReaderPhase, ReaderProgress, ReadResult};
 pub use extract::{ExtractOptions, ExtractResult, EntryMetadataResult, ExtractionSync};
 pub use remvibe_filesystem_core::{MetadataPolicy, MetadataRequirement, MetadataApplyResult, MetadataApplyStatus, MetadataField};
+pub use split::{ArchiveLayout, SplitReader, SPLIT_PART_HEADER_LEN, MAX_SPLIT_PARTS};

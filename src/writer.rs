@@ -1,6 +1,7 @@
 //! Single-pass, manifest-last archive creation. No transport or extraction logic.
 use crate::{ArchiveEntry, ArchiveManifest, ArchiveMetadata, ArchivePath, Compression, EntryKind,
-    FilePayload, Header, ManifestError, ManifestLimits, PathCodecError, PathComponent};
+    FilePayload, Header, ManifestError, ManifestLimits, PathCodecError, PathComponent, ArchiveLayout, SPLIT_PART_HEADER_LEN};
+use crate::split::{SplitOutput, SplitCancelled};
 use flate2::write::ZlibEncoder;
 use remvibe_filesystem_core::{FileSystemError, FileSystemItem, FileSystemItemKind, FileSystemLocation,
     FileSystemMetadata, FileSystemService};
@@ -25,6 +26,7 @@ pub enum MetadataCapture { Basic, Full }
 
 #[derive(Debug, Clone)]
 pub struct WriterOptions {
+    pub layout: ArchiveLayout,
     pub compression: Compression,
     pub zlib_level: u32,
     pub zstd_level: i32,
@@ -36,7 +38,7 @@ pub struct WriterOptions {
 }
 impl Default for WriterOptions {
     fn default() -> Self {
-        Self { compression: Compression::Zstd, zlib_level: 6, zstd_level: 3, manifest_compression: Compression::Zstd, buffer_size: 1024 * 1024,
+        Self { layout: ArchiveLayout::Single, compression: Compression::Zstd, zlib_level: 6, zstd_level: 3, manifest_compression: Compression::Zstd, buffer_size: 1024 * 1024,
             metadata_capture: MetadataCapture::Basic, limits: ManifestLimits::default(),
             cancellation: CancellationToken::new() }
     }
@@ -63,7 +65,10 @@ pub struct WriterResult {
     pub path: PathBuf,
     pub entry_count: usize,
     pub source_bytes: u64,
+    /// Logical RVA bytes, without split envelopes.
     pub archive_bytes: u64,
+    pub part_count: u64,
+    pub physical_bytes: u64,
 }
 
 #[derive(Debug)]
@@ -101,17 +106,44 @@ impl Error for WriterError {}
 impl From<FileSystemError> for WriterError { fn from(e: FileSystemError) -> Self { Self::FileSystem(e) } }
 impl From<PathCodecError> for WriterError { fn from(e: PathCodecError) -> Self { Self::Path(e) } }
 impl From<ManifestError> for WriterError { fn from(e: ManifestError) -> Self { Self::Manifest(e) } }
-fn io_at(path: &Path, source: io::Error) -> WriterError { WriterError::Io { path: path.to_owned(), source } }
+fn io_at(path: &Path, source: io::Error) -> WriterError {
+    if source.get_ref().is_some_and(|e| e.is::<SplitCancelled>()) { WriterError::Cancelled }
+    else { WriterError::Io { path: path.to_owned(), source } }
+}
+
+enum ArchiveOutput {
+    Single(File),
+    Split(SplitOutput),
+}
+impl ArchiveOutput {
+    fn position(&mut self) -> io::Result<u64> {
+        match self { Self::Single(file) => file.stream_position(), Self::Split(split) => Ok(split.position()) }
+    }
+    fn finish(self, logical_bytes: u64) -> io::Result<(u64, u64)> {
+        match self {
+            Self::Single(file) => { file.sync_all()?; Ok((1, logical_bytes)) }
+            Self::Split(split) => split.finish(),
+        }
+    }
+}
+impl Write for ArchiveOutput {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        match self { Self::Single(file) => file.write(bytes), Self::Split(split) => split.write(bytes) }
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        match self { Self::Single(file) => file.flush(), Self::Split(split) => split.flush() }
+    }
+}
 
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
-/// Owns exactly one sibling staging file. Any failed add or finish aborts the
+/// Owns a sibling staging file or a private sibling split-set directory. Any failed add or finish aborts the
 /// complete archive; a failed writer cannot be reused. Call abort explicitly
 /// for a reportable cleanup result; Drop is only best-effort.
 pub struct ArchiveWriter {
     destination: PathBuf,
     stage: Option<PathBuf>,
-    output: Option<File>,
+    output: Option<ArchiveOutput>,
     options: WriterOptions,
     manifest: ArchiveManifest,
     paths: HashSet<ArchivePath>,
@@ -148,6 +180,11 @@ impl ArchiveWriter {
         if options.zlib_level > 9 || !(1..=19).contains(&options.zstd_level) || options.buffer_size == 0 || options.buffer_size > 64 * 1024 * 1024 {
             return Err(WriterError::Invalid("invalid compression level or buffer size"));
         }
+        if let ArchiveLayout::Split { max_part_size } = options.layout {
+            if max_part_size <= SPLIT_PART_HEADER_LEN {
+                return Err(WriterError::Invalid("split part size must exceed physical header size"));
+            }
+        }
         require_absolute(destination)?;
         let name = destination.file_name().ok_or(WriterError::Invalid("missing archive filename"))?;
         PathComponent::from_native(name)?.to_native()?;
@@ -160,8 +197,13 @@ impl ArchiveWriter {
             let id = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
             let stage = parent.join(format!(".remvibe-rva-{}-{id}.tmp", std::process::id()));
             if stage == destination { continue; }
-            match OpenOptions::new().write(true).create_new(true).open(&stage) {
-                Ok(file) => { reserved = Some((stage, file)); break; }
+            let result = match options.layout {
+                ArchiveLayout::Single => OpenOptions::new().write(true).create_new(true).open(&stage).map(ArchiveOutput::Single),
+                ArchiveLayout::Split { max_part_size } => fs::create_dir(&stage)
+                    .map(|()| ArchiveOutput::Split(SplitOutput::new(stage.clone(), max_part_size, options.cancellation.clone()))),
+            };
+            match result {
+                Ok(output) => { reserved = Some((stage, output)); break; }
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(e) => return Err(io_at(&stage, e)),
             }
@@ -224,7 +266,7 @@ impl ArchiveWriter {
             let actual = fs::canonicalize(source).map_err(|e| io_at(source, e))?;
             let stage = fs::canonicalize(self.stage.as_ref().ok_or(WriterError::Closed)?)
                 .map_err(|e| io_at(self.stage.as_ref().unwrap(), e))?;
-            if actual == stage { return Err(WriterError::Invalid("cannot archive the staging archive")); }
+            if actual == stage || actual.starts_with(&stage) { return Err(WriterError::Invalid("cannot archive the staging archive")); }
         }
         Ok(item)
     }
@@ -258,7 +300,7 @@ impl ArchiveWriter {
         }
         let stage = self.stage.as_ref().ok_or(WriterError::Closed)?.clone();
         let output = self.output.as_mut().ok_or(WriterError::Closed)?;
-        let offset = output.stream_position().map_err(|e| io_at(&stage, e))?;
+        let offset = output.position().map_err(|e| io_at(&stage, e))?;
         let token = &self.options.cancellation;
         let progress = &mut self.progress;
         let entries_completed = self.manifest.entries.len();
@@ -287,7 +329,7 @@ impl ArchiveWriter {
                 hash
             }
         };
-        let stored_size = output.stream_position().map_err(|e| io_at(&stage, e))?
+        let stored_size = output.position().map_err(|e| io_at(&stage, e))?
             .checked_sub(offset).ok_or(WriterError::Invalid("invalid stored payload position"))?;
         let after = input.metadata().map_err(|e| io_at(source, e))?;
         let current = self.source_item(source)?;
@@ -364,15 +406,14 @@ impl ArchiveWriter {
         self.options.cancellation.check()?;
         let stage = self.stage.as_ref().ok_or(WriterError::Closed)?.clone();
         let mut output = self.output.take().ok_or(WriterError::Closed)?;
-        let offset = output.stream_position().map_err(|e| io_at(&stage, e))?;
+        let offset = output.position().map_err(|e| io_at(&stage, e))?;
         let (manifest, footer) = self.manifest.encode_with_compression(offset, &self.options.limits, self.options.manifest_compression,
             self.options.zlib_level, self.options.zstd_level)?;
         self.options.cancellation.check()?;
         output.write_all(&manifest).map_err(|e| io_at(&stage, e))?;
         output.write_all(&footer.encode()).map_err(|e| io_at(&stage, e))?;
-        let archive_bytes = output.stream_position().map_err(|e| io_at(&stage, e))?;
-        output.sync_all().map_err(|e| io_at(&stage, e))?;
-        drop(output);
+        let archive_bytes = output.position().map_err(|e| io_at(&stage, e))?;
+        let (part_count, physical_bytes) = output.finish(archive_bytes).map_err(|e| io_at(&stage, e))?;
         self.options.cancellation.check()?;
         require_absent(&self.destination)?;
         // Shared FileSystem native no-replace rename; same canonical parent.
@@ -382,7 +423,7 @@ impl ArchiveWriter {
         self.stage = None; // publication won; subsequent cancellation does not undo it
         self.event(WriterPhase::Completed, None, 0, None);
         Ok(WriterResult { path: self.destination.clone(), entry_count: self.manifest.entries.len(),
-            source_bytes: self.source_bytes, archive_bytes })
+            source_bytes: self.source_bytes, archive_bytes, part_count, physical_bytes })
     }
 
     /// Explicitly discard a staging archive. Reports cleanup failures.
@@ -394,7 +435,11 @@ impl ArchiveWriter {
     fn cleanup(&mut self) -> Result<(), (PathBuf, io::Error)> {
         drop(self.output.take());
         if let Some(path) = self.stage.take() {
-            match fs::remove_file(&path) {
+            let removed = match self.options.layout {
+                ArchiveLayout::Single => fs::remove_file(&path),
+                ArchiveLayout::Split { .. } => fs::remove_dir_all(&path),
+            };
+            match removed {
                 Ok(()) => {}
                 Err(e) if e.kind() == io::ErrorKind::NotFound => {}
                 Err(e) => { self.stage = Some(path.clone()); return Err((path, e)); }
