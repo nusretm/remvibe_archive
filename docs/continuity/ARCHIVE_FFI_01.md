@@ -1,6 +1,6 @@
 # ARCHIVE-FFI-01 — Dart FFI bindings
 
-Status: A TECHNICAL ACCEPTANCE COMPLETE on 2026-11-25; B awaiting explicit operator authorization; C–E gated. Main verified f81c41091e6e39d8a4e504bb81df568ddb9ae434.
+Status: A ACCEPTED AND CLOSED on 2026-11-25; B AUTHORIZED; C–E gated. Main verified f81c41091e6e39d8a4e504bb81df568ddb9ae434.
 
 ## Goal
 Expose the accepted RVA V3 Rust core to Dart via remvibe_archive_dart at dart/, with a private cdylib crate remvibe_archive_ffi at dart/native/. Keep Rust direct Cargo consumers independent of Dart/FFI. Bind the existing core rather than duplicate archive or FileSystem algorithms.
@@ -21,8 +21,8 @@ Accepted source HEAD 1a07cc6d5f993ca18314fd78c10449c89ec63ca0, accepted source t
 - Proposed public ArchiveService, ArchiveWriter, ArchiveReader, ArchiveOperation<T>, ArchiveReadOperation and typed options/results. Exact functional signatures introduced in B–D. Single default; Split directory, Embedded bounded read only; selected single file extraction, no arbitrary list/subtree, overwrite or merge.
 - Native Assets target mappings Windows x64, Linux x64/arm64, macOS x64/arm64 (design only); explicit absolute library override in separate process. Zstd bundled/static intent to be inspected in E. Preserve direct Rust consumer.
 ## Checkpoints
-- A (technical PASS): private FFI crate and Dart package, ABI v1/header/buffer, native path codec, errors, loading, generic handle/operation substrate, focused foundation probe on Windows/Ubuntu with locked build/analyze and default/explicit native loading. No writer/reader functions.
-- B (pending): Writer Single/Split, recursive/nonrecursive and per-file codec, options, progress/cancel, finish/abort/cleanup, real Dart creation and Rust interoperability; heartbeat during work.
+- A (accepted and closed): private FFI crate and Dart package, ABI v1/header/buffer, native path codec, errors, loading, generic handle/operation substrate, focused foundation probe on Windows/Ubuntu with locked build/analyze and default/explicit native loading. No writer/reader functions.
+- B (authorized): Writer Single/Split, recursive/nonrecursive and per-file codec, options, progress/cancel, finish/abort/cleanup, real Dart creation and Rust interoperability; heartbeat during work.
 - C (pending): Reader Single/Split/Embedded, manifest, verify, full/selected extraction, Buffered/PerFile, metadata, integrity/error/progress/cancel.
 - D (pending): selected-entry binary streaming, bounded delivery, pause/resume/cancel, lifecycle and concurrent independent operations.
 - E (pending): integrated locked Windows/Linux runtime, both library modes, bidirectional actual Dart Single/Split exchange, CLI package runtime and native linkage inspection, direct Rust consumer regression. Separate merge/cleanup approval.
@@ -41,3 +41,6 @@ Operator committed and pushed actual generated locks at d1061012a6bddec04a9c0b54
 
 ## Checkpoint A — final technical closure (2026-11-25)
 Operator retest on both Windows and Ubuntu at exact source HEAD da238f9c151431a97df9ae959137615e9fa952ca: Windows private locked all-target check 0.38s, debug locked build 1.13s; Ubuntu check 0.18s, build 0.43s. No reported compiler warnings or errors. All four foundation runs (Windows Native Assets/explicit DLL and Ubuntu Native Assets/explicit SO) emitted ABI_CORE_DEFAULTS_PASS, NATIVE_PATH_LEXICAL_ROUNDTRIP_PASS, OPERATION_LIFETIME_AND_TYPED_ERRORS_PASS and ARCHIVE_FFI_A_FOUNDATION_COMPLETED with correct mode/os. Both working trees clean. Prior root locked check, locked Dart dependency resolution and Dart analyze accepted at d1061012a6bddec04a9c0b54cee89334ac220c33; correction changed only private operation allocation source and continuity, no dependency or Dart source changes. Root accepted source and all three locks preserved. A technical acceptance complete; no active archive cancellation/progress, real raw disk-name, archive Writer/Reader, AOT packaging or macOS runtime claims. Await explicit authorization for B; no B source changes, merge or cleanup.
+
+## Checkpoint B authorization (2026-11-25)
+Operator explicitly accepted A and authorized B only. Implement the actual Core writer, its public Dart models and operations, progress/cancellation, explicit cleanup and focused real Windows/Linux writer interoperability. No reader FFI, streaming, dependency changes or Core edits authorized. Use direct Rust reader solely as an acceptance probe of writer output. No merge/cleanup.
