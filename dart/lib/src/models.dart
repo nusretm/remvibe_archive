@@ -1,4 +1,4 @@
-import 'dart:convert';
+import 'dart:convert' as convert;
 import 'dart:io';
 
 enum ArchiveNativeEncoding { windowsUtf16, unixBytes }
@@ -24,7 +24,7 @@ class ArchiveNativePath {
 
   factory ArchiveNativePath.fromString(String path) => Platform.isWindows
       ? ArchiveNativePath(ArchiveNativeEncoding.windowsUtf16, path.codeUnits)
-      : ArchiveNativePath(ArchiveNativeEncoding.unixBytes, utf8.encode(path));
+      : ArchiveNativePath(ArchiveNativeEncoding.unixBytes, convert.utf8.encode(path));
 
   factory ArchiveNativePath.fromJson(Object? value) {
     final data = jsonObject(value);
@@ -39,7 +39,7 @@ class ArchiveNativePath {
   /// For display only; always use the original units for native operations.
   String get displayPath => encoding == ArchiveNativeEncoding.windowsUtf16
       ? String.fromCharCodes(units)
-      : utf8.decode(units, allowMalformed: true);
+      : convert.utf8.decode(units, allowMalformed: true);
 }
 
 enum ArchiveCompression { none, zlib, zstd }
@@ -89,7 +89,7 @@ class ArchivePathComponent {
   const ArchivePathComponent._(this.encoding, this.value);
 
   factory ArchivePathComponent.utf8(String value) {
-    if (utf8.decode(utf8.encode(value)) != value ||
+    if (convert.utf8.decode(convert.utf8.encode(value)) != value ||
         value.isEmpty || value == '.' || value == '..' ||
         value.contains('/') || value.contains('\u0000')) {
       throw ArgumentError.value(value, 'value', 'Invalid Unicode archive component');
@@ -101,7 +101,7 @@ class ArchivePathComponent {
     if (bytes.isEmpty || bytes.any((n) => n <= 0 || n > 255 || n == 47)) {
       throw ArgumentError('Invalid Unix archive component units');
     }
-    return ArchivePathComponent._(ArchivePathEncoding.unixBytes, base64.encode(bytes));
+    return ArchivePathComponent._(ArchivePathEncoding.unixBytes, convert.base64.encode(bytes));
   }
   factory ArchivePathComponent.windowsUtf16(Iterable<int> units) {
     final bytes = <int>[];
@@ -112,7 +112,7 @@ class ArchivePathComponent {
       bytes.addAll([n & 255, n >> 8]);
     }
     if (bytes.isEmpty) throw ArgumentError('Empty Windows archive component');
-    return ArchivePathComponent._(ArchivePathEncoding.windowsUtf16, base64.encode(bytes));
+    return ArchivePathComponent._(ArchivePathEncoding.windowsUtf16, convert.base64.encode(bytes));
   }
   factory ArchivePathComponent.fromJson(Object? value) {
     final map = jsonObject(value);

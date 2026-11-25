@@ -94,18 +94,14 @@ class ArchiveWriter {
     _closing = true;
     final active = _active;
     try {
-      if (active?.isRunning == true) {
-        try {
-          await active!.cancel();
-        } finally {
-          try {
-            await active!.result;
-          } on ArchiveException catch (error) {
-            // The original command owns its other errors; cleanup is also
-            // relevant to the caller awaiting close.
-            if (error.kind == ArchiveErrorKind.cleanup) rethrow;
-          }
-        }
+      if (active != null && active.isRunning) {
+        // Attach the terminal result listener immediately, before the
+        // cancellation request can complete or fail.
+        final wait = active.result.then<void>((_) {}, onError: (Object error, StackTrace stack) {
+          if (error is ArchiveException && error.kind != ArchiveErrorKind.cleanup) return;
+          Error.throwWithStackTrace(error, stack);
+        });
+        await Future.wait<void>([wait, active.cancel()]);
       }
     } finally {
       await callArchiveNative(_library, 'writer_close', {'handle': _handle});
