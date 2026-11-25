@@ -1,6 +1,6 @@
 # RemVibe Archive — current target
 
-2026-11-25: **ARCHIVE-RUST-01 A–F ACCEPTED AND CLOSED; ARCHIVE-FFI-01 CHECKPOINT A WINDOWS TECHNICAL PASS; LOCKFILE COMMIT AND UBUNTU ACCEPTANCE PENDING.** Main f81c41091e6e39d8a4e504bb81df568ddb9ae434 verified; operator approved architecture and A–E on 2026-11-25, with implementation limited to A on feature/archive-ffi-01.
+2026-11-25: **ARCHIVE-RUST-01 A–F ACCEPTED AND CLOSED; ARCHIVE-FFI-01 CHECKPOINT A WINDOWS/UBUNTU FUNCTIONAL PASS; FOCUSED WARNING CORRECTION RETEST PENDING.** Main f81c41091e6e39d8a4e504bb81df568ddb9ae434 verified; operator approved architecture and A–E on 2026-11-25, with implementation limited to A on feature/archive-ffi-01.
 
 ## Accepted baseline
 - Source HEAD 1a07cc6d5f993ca18314fd78c10449c89ec63ca0; source tree 0072d4061a9c1f0e04805c5c3c1d8979e16ee3d9; final acceptance continuity 26f5503e659739722acf797fa99172ddbf8db18e.
@@ -15,3 +15,5 @@ Wider sequence: UI-DATAGRID-MULTISELECT-01, FS-CORE-01, FS-FFI-01, FS-FLUTTER-01
 
 ## Checkpoint A — Windows evidence (2026-11-25)
 Operator verified exact HEAD 9be8d82f8b327a70c2eaa3382b7c7456a8fd9636 before/after. Private initial and locked check/build, root locked check, Dart pub get/analyze and both Native Assets/explicit DLL foundation runs PASS. Only private Cargo.lock and dart/pubspec.lock untracked; root lock unchanged. Commit actual generated locks and repeat locked acceptance on Windows/Ubuntu; no B authorization.
+
+Both platforms passed at d1061012a6bddec04a9c0b54cee89334ac220c33 with identical committed locks. Ubuntu reported fetch_update deprecation; private FFI allocation loop corrected without Core or dependency changes. Corrected source runtime retest pending on both platforms. See ARCHIVE_FFI_01.md. B authorization remains separate.

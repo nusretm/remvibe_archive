@@ -31,8 +31,16 @@ fn registry() -> MutexGuard<'static, HashMap<u64, Arc<Operation>>> {
 }
 
 fn start(operation: &'static str, task: impl FnOnce(CancellationToken) -> Reply + Send + 'static) -> Reply {
-    let id = NEXT_HANDLE.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(1))
-        .map_err(|_| bridge_error(operation,"invalidInput","operation handles exhausted"))?;
+    // Checked monotonic allocation on both supported Rust toolchains.
+    let mut current = NEXT_HANDLE.load(Ordering::Relaxed);
+    let id = loop {
+        let next = current.checked_add(1)
+            .ok_or_else(|| bridge_error(operation,"invalidInput","operation handles exhausted"))?;
+        match NEXT_HANDLE.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(previous) => break previous,
+            Err(observed) => current = observed,
+        }
+    };
     let entry = Arc::new(Operation {
         token: CancellationToken::new(), state: Mutex::new(State::default()),
         ready: Condvar::new(), worker: Mutex::new(None),
