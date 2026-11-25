@@ -2,6 +2,7 @@
 mod operations;
 mod path;
 mod writer;
+mod reader;
 
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};

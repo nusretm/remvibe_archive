@@ -8,15 +8,15 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{collections::HashMap, path::PathBuf, sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock}};
 
-fn native_path(op: &str, value: NativeUnits) -> Result<PathBuf, Value> {
+pub(crate) fn native_path(op: &str, value: NativeUnits) -> Result<PathBuf, Value> {
     value.into_os().map(PathBuf::from).map_err(|e| bridge_error(op,"invalidInput",e))
 }
-fn u64_value(op: &str, raw: &str) -> Result<u64, Value> {
+pub(crate) fn u64_value(op: &str, raw: &str) -> Result<u64, Value> {
     let value = raw.parse::<u64>().map_err(|_| bridge_error(op,"invalidInput","expected decimal u64"))?;
     if value.to_string() != raw { return Err(bridge_error(op,"invalidInput","noncanonical decimal u64")); }
     Ok(value)
 }
-fn usize_value(op: &str, raw: &str) -> Result<usize, Value> {
+pub(crate) fn usize_value(op: &str, raw: &str) -> Result<usize, Value> {
     usize::try_from(u64_value(op, raw)?).map_err(|_| bridge_error(op,"invalidInput","value exceeds native usize"))
 }
 
@@ -32,7 +32,7 @@ enum CaptureInput { Basic, Full }
 
 #[derive(Default, Deserialize)]
 #[serde(default, rename_all="camelCase", deny_unknown_fields)]
-struct LimitsInput {
+pub(crate) struct LimitsInput {
     max_manifest_bytes: Option<String>,
     max_entries: Option<String>,
     max_depth: Option<String>,
@@ -40,7 +40,7 @@ struct LimitsInput {
     max_total_bytes: Option<String>,
 }
 impl LimitsInput {
-    fn apply(self, op: &str) -> Result<ManifestLimits, Value> {
+    pub(crate) fn apply(self, op: &str) -> Result<ManifestLimits, Value> {
         let mut limits = ManifestLimits::default();
         if let Some(v) = self.max_manifest_bytes { limits.max_manifest_bytes = u64_value(op,&v)?; }
         if let Some(v) = self.max_entries { limits.max_entries = usize_value(op,&v)?; }

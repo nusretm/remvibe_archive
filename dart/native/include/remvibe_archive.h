@@ -44,6 +44,16 @@ RemVibeArchiveBuffer *remvibe_archive_writer_finish(const uint8_t *data, size_t 
 RemVibeArchiveBuffer *remvibe_archive_writer_abort(const uint8_t *data, size_t len);
 RemVibeArchiveBuffer *remvibe_archive_writer_close(const uint8_t *data, size_t len);
 
+/* Reader open starts an operation; terminal contains a distinct Reader handle,
+ * region and entry count. Manifest, verify and extract are asynchronous
+ * operations. Optional extract index selects one regular file only.
+ * Cancelled Reader must be closed and reopened. Close waits for active work. */
+RemVibeArchiveBuffer *remvibe_archive_reader_open(const uint8_t *data, size_t len);
+RemVibeArchiveBuffer *remvibe_archive_reader_manifest(const uint8_t *data, size_t len);
+RemVibeArchiveBuffer *remvibe_archive_reader_verify(const uint8_t *data, size_t len);
+RemVibeArchiveBuffer *remvibe_archive_reader_extract(const uint8_t *data, size_t len);
+RemVibeArchiveBuffer *remvibe_archive_reader_close(const uint8_t *data, size_t len);
+
 #ifdef __cplusplus
 }
 #endif

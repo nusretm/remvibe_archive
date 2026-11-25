@@ -62,14 +62,14 @@ impl OperationContext {
         lock(&self.0.state).sealed = true;
     }
 
-    /// Real Core phase transitions are queued in order. Same-phase writing
+    /// Real Core phase transitions are queued in order. Same-phase byte
     /// snapshots are sampled at ~100ms. A slow receiver cannot grow this native
     /// queue indefinitely; cancel/close releases a blocked producer.
     pub(crate) fn emit(&self, phase: &str, value: Value) {
         let mut state = lock(&self.0.state);
         if state.abandoned || state.sealed { return; }
         let now = Instant::now();
-        if state.last_phase.as_deref() == Some(phase) && phase == "writing"
+        if state.last_phase.as_deref() == Some(phase) && matches!(phase, "writing" | "reading" | "verifying" | "extracting")
             && state.last_snapshot.is_some_and(|last| now.duration_since(last) < PROGRESS_INTERVAL) {
             return;
         }
