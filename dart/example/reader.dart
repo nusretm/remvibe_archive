@@ -227,11 +227,23 @@ Future<void> main(List<String> args) async {
         require(e.kind == ArchiveBridgeErrorKind.busy,'Expected busy');
       }
       require(await Future.any<bool>([started.future,terminal.then((_) => false)]),'No real extraction progress');
-      if (close) { await large.close(); } else { await operation.cancel(); }
-      require(await terminal && !operation.isRunning && ticks > 0,'Active cancellation/heartbeat failed');
+      // An actual event-queue callback while extraction is active proves
+      // responsiveness without depending on the OS periodic timer granularity.
+      await Future<void>(() {
+        require(operation.isRunning,'Extraction finished before event-loop heartbeat');
+      });
+      if (close) {
+        await large.close();
+        require(!operation.isRunning,'close returned before operation cleanup');
+      } else {
+        await operation.cancel();
+      }
+      final cancelled = await terminal;
+      require(cancelled,'Expected real cancelled terminal result; extraction completed successfully');
+      require(!operation.isRunning,'Terminal result arrived before operation cleanup');
       require(absent(join(root,name)),'Cancelled destination published');
       await expectArchive(ArchiveErrorKind.closed,() async {await large.verify().result;});
-      print('DART_READER_${close ? "ACTIVE_CLOSE" : "ACTIVE_CANCEL"}_PASS ticks=$ticks');
+      print('DART_READER_${close ? "ACTIVE_CLOSE" : "ACTIVE_CANCEL"}_PASS ticks=$ticks eventLoopHeartbeat=PASS');
     } finally {
       timer.cancel();
       await subscription.cancel();
