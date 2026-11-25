@@ -237,6 +237,9 @@ Future<void> main(List<String> args) async {
       }
       switch (mode) {
         case 'NO_LISTENER':
+          // Allow an initial pull to reach native code without a subscriber.
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          require(op.isRunning, 'Unlistened large stream finished prematurely');
           await op.cancel();
           break;
         case 'PAUSED_CANCEL':

@@ -92,7 +92,7 @@ class ArchiveReadOperation implements ArchiveActiveOperation {
       final wake = _wake ??= Completer<void>();
       await wake.future;
     }
-    if (_stopping) await _cancelFuture;
+    if (_stopping) await _cancelFuture!;
   }
 
   @override
@@ -127,7 +127,7 @@ class ArchiveReadOperation implements ArchiveActiveOperation {
       await for (final message in receiver) {
         if (message is SendPort) {
           requests = message;
-          if (_stopping) await _cancelFuture;
+          if (_stopping) await _cancelFuture!;
           // At most one frame may arrive before a listener attaches.
           requests.send(true);
           continue;
@@ -157,7 +157,7 @@ class ArchiveReadOperation implements ArchiveActiveOperation {
           switch (message['kind']) {
             case 'progress':
               _progress.add(ArchiveProgress.fromJson(message['value']));
-              if (_stopping) await _cancelFuture;
+              if (_stopping) await _cancelFuture!;
               requests!.send(true);
               break;
             case 'terminal':
