@@ -1,6 +1,6 @@
 //! Stateful adapter for the accepted Reader Core. No format or extraction logic.
 use crate::{bridge_error, decode, reply, RemVibeArchiveBuffer, Reply};
-use crate::operations::{allocate_handle, lock, parse_handle, start_with_token, HandleInput, OperationContext};
+use crate::operations::{allocate_handle, lock, parse_handle, start_with_token, start_with_mode, HandleInput, OperationContext, StreamCancelled};
 use crate::path::{native, NativeUnits};
 use crate::writer::{native_path, u64_value, usize_value, LimitsInput};
 use remvibe_archive::{ArchiveReader, ArchiveMetadata, ArchiveTimestamp, CancellationToken,
@@ -254,18 +254,27 @@ fn reserve(op: &str, raw: &str) -> Result<Lease, Value> {
     Ok(Lease(slot))
 }
 enum Command {
-    Manifest, Verify, Extract { destination: PathBuf, options: ExtractOptions, index: Option<usize> },
+    Manifest, Verify, Read { index: usize }, Extract { destination: PathBuf, options: ExtractOptions, index: Option<usize> },
 }
 fn run_command(op: &'static str, raw: &str, command: Command) -> Reply {
     let lease = reserve(op,raw)?;
     let token = lease.0.token.clone();
-    start_with_token(op,token,move |context| {
+    let streaming = matches!(&command, Command::Read { .. });
+    start_with_mode(op,token,streaming,move |context| {
         let mut reader = lock(&lease.0.state).reader.take().ok_or_else(|| closed(op))?;
         let events = context.clone();
         reader.set_progress_handler(move |p| progress(&events,p));
         let outcome = match command {
             Command::Manifest => manifest(op,&reader,&context),
             Command::Verify => reader.verify().map(read_result).map_err(|e| reader_error(op,e)),
+            Command::Read { index } => reader.read_entry_to(index, &mut context.stream_sink())
+                .map(read_result).map_err(|e| {
+                    let e = match e {
+                        ReaderError::Io(ref io) if io.get_ref().is_some_and(|inner| inner.is::<StreamCancelled>()) => ReaderError::Cancelled,
+                        other => other,
+                    };
+                    reader_error(op,e)
+                }),
             Command::Extract { destination,options,index } => match index {
                 Some(i) => reader.extract_entry_to(i,&destination,options),
                 None => reader.extract_to(&destination,options),
@@ -356,6 +365,20 @@ pub unsafe extern "C" fn remvibe_archive_reader_extract(data: *const u8, len: us
         run_command(OP,&v.handle,Command::Extract {destination:native_path(OP,v.destination)?,options:v.options.apply(OP)?,index})
     })
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReadRequest { handle: String, index: String }
+
+#[no_mangle]
+pub unsafe extern "C" fn remvibe_archive_reader_read_entry(data: *const u8, len: usize) -> *mut RemVibeArchiveBuffer {
+    const OP: &str = "reader_read_entry";
+    reply(OP,|| {
+        let v = decode::<ReadRequest>(OP,data,len)?;
+        let index = usize_value(OP,&v.index)?;
+        run_command(OP,&v.handle,Command::Read {index})
+    })
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn remvibe_archive_reader_close(data: *const u8, len: usize) -> *mut RemVibeArchiveBuffer {
     const OP: &str = "reader_close";

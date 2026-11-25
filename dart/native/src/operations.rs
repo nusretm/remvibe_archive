@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
     collections::{HashMap, VecDeque},
+    io::{self, Write},
     panic::{catch_unwind, AssertUnwindSafe},
     sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, atomic::{AtomicU64, Ordering}},
     thread::{self, JoinHandle},
@@ -16,6 +17,7 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 const PROGRESS_CAPACITY: usize = 64;
+const STREAM_CHUNK_SIZE: usize = 256 * 1024;
 
 #[derive(Default)]
 struct State {
@@ -26,6 +28,11 @@ struct State {
     consumed: bool,
     sealed: bool,
     abandoned: bool,
+    streaming: bool,
+    stream_credit: bool,
+    stream_chunk: Option<Vec<u8>>,
+    stream_waiting_ack: bool,
+    stream_receiving: bool,
 }
 struct Operation {
     token: CancellationToken,
@@ -55,6 +62,8 @@ pub(crate) fn allocate_handle(operation: &str) -> Result<u64, Value> {
 pub(crate) struct OperationContext(Arc<Operation>);
 impl OperationContext {
     pub(crate) fn token(&self) -> CancellationToken { self.0.token.clone() }
+
+    pub(crate) fn stream_sink(&self) -> StreamSink { StreamSink(self.clone()) }
 
     // Once a writer command has decided its result, cancel from that operation
     // may no longer poison the writer's one-way token for a later command.
@@ -87,14 +96,68 @@ impl OperationContext {
     }
 }
 
+/// A write returns only after Dart has acknowledged the delivered chunk.
+/// The Core cannot hash/advance this write or produce the next chunk while
+/// the consumer is paused. The one-way token also wakes a waiting writer.
+#[derive(Debug)]
+pub(crate) struct StreamCancelled;
+impl std::fmt::Display for StreamCancelled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("archive stream cancelled")
+    }
+}
+impl std::error::Error for StreamCancelled {}
+
+pub(crate) struct StreamSink(OperationContext);
+impl Write for StreamSink {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.is_empty() { return Ok(0); }
+        let operation = &self.0.0;
+        let mut state = lock(&operation.state);
+        let cancelled = || io::Error::new(io::ErrorKind::BrokenPipe, StreamCancelled);
+        loop {
+            if state.abandoned || operation.token.is_cancelled() { return Err(cancelled()); }
+            if state.stream_credit && !state.stream_waiting_ack { break; }
+            let (next, _) = operation.ready.wait_timeout(state, PROGRESS_INTERVAL)
+                .unwrap_or_else(|e| e.into_inner());
+            state = next;
+        }
+        let count = bytes.len().min(STREAM_CHUNK_SIZE);
+        let mut frame = Vec::with_capacity(count + 1);
+        frame.push(1); // raw binary frame; never JSON/base64
+        frame.extend_from_slice(&bytes[..count]);
+        state.stream_credit = false;
+        state.stream_waiting_ack = true;
+        state.stream_chunk = Some(frame);
+        operation.ready.notify_all();
+        while state.stream_waiting_ack {
+            if state.abandoned || operation.token.is_cancelled() { return Err(cancelled()); }
+            let (next, _) = operation.ready.wait_timeout(state, PROGRESS_INTERVAL)
+                .unwrap_or_else(|e| e.into_inner());
+            state = next;
+        }
+        if state.abandoned || operation.token.is_cancelled() { return Err(cancelled()); }
+        Ok(count)
+    }
+    fn flush(&mut self) -> io::Result<()> { Ok(()) }
+}
+
 pub(crate) fn start_with_token(
     operation: &'static str,
     token: CancellationToken,
     task: impl FnOnce(OperationContext) -> Reply + Send + 'static,
 ) -> Reply {
+    start_with_mode(operation, token, false, task)
+}
+pub(crate) fn start_with_mode(
+    operation: &'static str,
+    token: CancellationToken,
+    streaming: bool,
+    task: impl FnOnce(OperationContext) -> Reply + Send + 'static,
+) -> Reply {
     let id = allocate_handle(operation)?;
     let entry = Arc::new(Operation {
-        token, state: Mutex::new(State::default()),
+        token, state: Mutex::new(State { streaming, ..State::default() }),
         ready: Condvar::new(), worker: Mutex::new(None),
     });
     let running = Arc::clone(&entry);
@@ -160,6 +223,7 @@ pub unsafe extern "C" fn remvibe_archive_operation_recv(data: *const u8, len: us
         let entry = { registry().get(&id).cloned() }
             .ok_or_else(|| bridge_error("operation_recv","invalidHandle","unknown operation handle"))?;
         let mut state = lock(&entry.state);
+        if state.streaming { return Err(bridge_error("operation_recv","invalidInput","use stream_recv for binary operation")); }
         loop {
             if state.consumed || state.abandoned {
                 return Err(bridge_error("operation_recv","invalidHandle","operation closed or terminal already consumed"));
@@ -204,6 +268,7 @@ pub unsafe extern "C" fn remvibe_archive_operation_close(data: *const u8, len: u
                 let mut state = lock(&entry.state);
                 state.abandoned = true;
                 state.progress.clear();
+                state.stream_chunk = None;
                 if !state.sealed { entry.token.cancel(); }
                 entry.ready.notify_all();
             }
@@ -214,4 +279,79 @@ pub unsafe extern "C" fn remvibe_archive_operation_close(data: *const u8, len: u
         }
         Ok(Value::Null)
     })
+}
+
+enum StreamFrame { Binary(Vec<u8>), Control(Reply) }
+
+// Single receiver, one request in flight. The next request acknowledges the
+// preceding binary frame and grants one new credit. Progress/control frames
+// do not grant additional outstanding credits.
+fn receive_stream(id: u64) -> StreamFrame {
+    const OP: &str = "stream_recv";
+    let Some(entry) = ({ registry().get(&id).cloned() }) else {
+        return StreamFrame::Control(Err(bridge_error(OP,"invalidHandle","unknown operation handle")));
+    };
+    let mut state = lock(&entry.state);
+    if !state.streaming {
+        return StreamFrame::Control(Err(bridge_error(OP,"invalidInput","not a binary operation")));
+    }
+    if state.stream_receiving {
+        return StreamFrame::Control(Err(bridge_error(OP,"busy","stream receiver already active")));
+    }
+    if state.consumed || state.abandoned {
+        return StreamFrame::Control(Err(bridge_error(OP,"invalidHandle","operation closed or terminal already consumed")));
+    }
+    state.stream_receiving = true;
+    if state.stream_chunk.is_none() {
+        state.stream_waiting_ack = false;
+        state.stream_credit = true;
+    }
+    entry.ready.notify_all();
+    let frame = loop {
+        if state.abandoned {
+            break StreamFrame::Control(Err(bridge_error(OP,"invalidHandle","operation closed")));
+        }
+        if entry.token.is_cancelled() {
+            state.stream_chunk = None;
+            state.stream_credit = false;
+            entry.ready.notify_all();
+        }
+        if let Some(progress) = state.progress.pop_front() {
+            entry.ready.notify_all();
+            break StreamFrame::Control(Ok(json!({"kind":"progress","value":progress})));
+        }
+        if let Some(chunk) = state.stream_chunk.take() {
+            // The producer waits for the *next* recv, not just this take.
+            break StreamFrame::Binary(chunk);
+        }
+        if let Some(terminal) = state.terminal.take() {
+            state.consumed = true;
+            break StreamFrame::Control(Ok(json!({"kind":"terminal","result":envelope(terminal)})));
+        }
+        state = entry.ready.wait(state).unwrap_or_else(|e| e.into_inner());
+    };
+    state.stream_receiving = false;
+    entry.ready.notify_all();
+    frame
+}
+
+/// Tagged Rust-owned buffer: byte 0 = existing JSON envelope, byte 1 = raw
+/// payload (1..=256 KiB). Both use the existing buffer_data/len/free ABI.
+/// Never call operation_recv on a stream handle.
+#[no_mangle]
+pub unsafe extern "C" fn remvibe_archive_stream_recv(data: *const u8, len: usize) -> *mut RemVibeArchiveBuffer {
+    const OP: &str = "stream_recv";
+    let frame = catch_unwind(AssertUnwindSafe(|| match handle(OP,data,len) {
+        Ok(id) => receive_stream(id),
+        Err(error) => StreamFrame::Control(Err(error)),
+    })).unwrap_or_else(|_| StreamFrame::Control(Err(bridge_error(OP,"panic","native stream receive panicked"))));
+    let bytes = match frame {
+        StreamFrame::Binary(bytes) => bytes,
+        StreamFrame::Control(result) => {
+            let mut bytes = vec![0];
+            if serde_json::to_writer(&mut bytes,&envelope(result)).is_err() { return std::ptr::null_mut(); }
+            bytes
+        }
+    };
+    Box::into_raw(Box::new(RemVibeArchiveBuffer(bytes)))
 }

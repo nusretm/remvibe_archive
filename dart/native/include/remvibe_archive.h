@@ -54,6 +54,16 @@ RemVibeArchiveBuffer *remvibe_archive_reader_verify(const uint8_t *data, size_t 
 RemVibeArchiveBuffer *remvibe_archive_reader_extract(const uint8_t *data, size_t len);
 RemVibeArchiveBuffer *remvibe_archive_reader_close(const uint8_t *data, size_t len);
 
+/* Selected regular-file stream. Start returns an operation handle; use
+ * stream_recv (single receiver, one request at a time), not operation_recv.
+ * Returned buffer starts with tag 0 (JSON envelope incl progress/terminal)
+ * or 1 (raw nonempty payload, max 256 KiB). The next recv acknowledges
+ * the preceding payload and grants one credit. Cancel/close use existing
+ * operation functions and wake blocked producers. Payload is provisional
+ * until successful terminal SHA-256 verification. Free every buffer. */
+RemVibeArchiveBuffer *remvibe_archive_reader_read_entry(const uint8_t *data, size_t len);
+RemVibeArchiveBuffer *remvibe_archive_stream_recv(const uint8_t *data, size_t len);
+
 #ifdef __cplusplus
 }
 #endif
