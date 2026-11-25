@@ -23,13 +23,26 @@ void remvibe_archive_buffer_free(RemVibeArchiveBuffer *buffer);
 RemVibeArchiveBuffer *remvibe_archive_native_path_roundtrip(const uint8_t *data, size_t len);
 
 /* Start returns a decimal-string operation handle.
- * recv blocks and returns one terminal event with nested result envelope.
+ * recv blocks and returns ordered progress events, then one terminal
+ * event with nested result envelope.
  * cancel requests cancellation; close releases handle and joins worker.
  * Neither holds the registry lock while waiting. */
 RemVibeArchiveBuffer *remvibe_archive_core_info(void);
 RemVibeArchiveBuffer *remvibe_archive_operation_recv(const uint8_t *data, size_t len);
 RemVibeArchiveBuffer *remvibe_archive_operation_cancel(const uint8_t *data, size_t len);
 RemVibeArchiveBuffer *remvibe_archive_operation_close(const uint8_t *data, size_t len);
+
+/* Writer create/commands start native operations. The create terminal value
+ * contains a distinct writer handle. One command at a time per writer.
+ * Failed core add/finish closes staging; finish/abort consume the writer.
+ * writer_close is idempotent, synchronous (may block) and explicitly aborts
+ * unpublished staging. Always receive operation results and close handles. */
+RemVibeArchiveBuffer *remvibe_archive_writer_create(const uint8_t *data, size_t len);
+RemVibeArchiveBuffer *remvibe_archive_writer_add_file(const uint8_t *data, size_t len);
+RemVibeArchiveBuffer *remvibe_archive_writer_add_directory(const uint8_t *data, size_t len);
+RemVibeArchiveBuffer *remvibe_archive_writer_finish(const uint8_t *data, size_t len);
+RemVibeArchiveBuffer *remvibe_archive_writer_abort(const uint8_t *data, size_t len);
+RemVibeArchiveBuffer *remvibe_archive_writer_close(const uint8_t *data, size_t len);
 
 #ifdef __cplusplus
 }

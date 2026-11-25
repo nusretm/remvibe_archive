@@ -1,6 +1,7 @@
 //! Private C ABI adapter. Archive algorithms remain in the root rlib.
 mod operations;
 mod path;
+mod writer;
 
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
