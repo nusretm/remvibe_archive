@@ -108,7 +108,7 @@ impl PathComponent {
                 return Err(PathCodecError("invalid Windows target name"));
             }
             let units: Vec<u16> = name.encode_wide().collect();
-            if matches!(units.last(), Some(32 | 46)) {
+            if matches!(units.last().copied(), Some(32 | 46)) {
                 return Err(PathCodecError("Windows target name ends in space or dot"));
             }
             // Check reserved device stems, including Win32 superscript digits.
