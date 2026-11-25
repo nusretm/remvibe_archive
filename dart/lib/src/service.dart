@@ -47,7 +47,11 @@ class ArchiveWriter {
 
   ArchiveOperation<T> _start<T>(
       String operation, Map<String, Object?> fields, T Function(Object?) decode) {
-    if (_closing || _sealed) throw StateError('Archive writer is closed');
+    if (_closing || _sealed) {
+      throw ArchiveException.fromJson({
+        'kind': 'closed', 'operation': operation, 'message': 'Archive writer is closed',
+      });
+    }
     if (_active?.isRunning == true) {
       throw const ArchiveBridgeException(ArchiveBridgeErrorKind.busy, 'writer', 'Writer already has an active operation');
     }

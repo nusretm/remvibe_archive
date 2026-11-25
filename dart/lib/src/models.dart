@@ -22,9 +22,16 @@ class ArchiveNativePath {
     }
   }
 
-  factory ArchiveNativePath.fromString(String path) => Platform.isWindows
-      ? ArchiveNativePath(ArchiveNativeEncoding.windowsUtf16, path.codeUnits)
-      : ArchiveNativePath(ArchiveNativeEncoding.unixBytes, convert.utf8.encode(path));
+  factory ArchiveNativePath.fromString(String path) {
+    if (Platform.isWindows) {
+      return ArchiveNativePath(ArchiveNativeEncoding.windowsUtf16, path.codeUnits);
+    }
+    final bytes = convert.utf8.encode(path);
+    if (convert.utf8.decode(bytes) != path) {
+      throw ArgumentError('Invalid Unicode path; pass raw Unix byte units explicitly');
+    }
+    return ArchiveNativePath(ArchiveNativeEncoding.unixBytes, bytes);
+  }
 
   factory ArchiveNativePath.fromJson(Object? value) {
     final data = jsonObject(value);

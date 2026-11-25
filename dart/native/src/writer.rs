@@ -294,12 +294,13 @@ pub unsafe extern "C" fn remvibe_archive_writer_close(data: *const u8, len: usiz
             while state.busy {
                 state = slot.ready.wait(state).unwrap_or_else(|e| e.into_inner());
             }
-            let writer = state.writer.take();
-            drop(state);
-            let outcome = if let Some(writer) = writer {
+            // Serialize concurrent close callers for this handle until its
+            // cleanup is complete, without holding the global registry lock.
+            let outcome = if let Some(writer) = state.writer.take() {
                 writer.abort().map_err(|e| writer_error(OP,e))
             } else { Ok(()) };
             writers().remove(&id);
+            drop(state);
             outcome?;
         }
         Ok(Value::Null)

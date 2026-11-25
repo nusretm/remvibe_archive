@@ -238,7 +238,9 @@ Future<void> main(List<String> args) async {
         require(error.kind == ArchiveBridgeErrorKind.busy, 'Unexpected busy error');
       }
       await expectArchive(ArchiveErrorKind.cancelled, () async { await operation.result; });
-      await request;
+      final cancellation = request;
+      require(cancellation != null, 'Cancellation request not issued');
+      await cancellation!;
       require(observedWriting && heartbeats > 0, 'Real progress/heartbeat not observed');
       print('DART_WRITER_ACTIVE_CANCEL_HEARTBEAT_PASS ticks=$heartbeats');
     } finally {
@@ -257,6 +259,33 @@ Future<void> main(List<String> args) async {
   await closeWriter.close();
   await closeWriter.close();
   require(absent(closed), 'Close published staging');
+  noStages(root);
+  // Active close must await cancellation and the Core's staging cleanup.
+  final activeClose = join(root, 'active-close.rva');
+  final activeWriter = await service.createWriter(native(activeClose),
+      options: ArchiveWriterOptions(zstdLevel: 19, bufferSize: BigInt.from(64 * 1024))).result;
+  try {
+    final op = activeWriter.addFile(source: native(large), path: relative('large.bin'));
+    final writing = Completer<bool>();
+    final terminal = op.result.then<bool>((_) => false, onError: (Object error, StackTrace stack) {
+      if (error is ArchiveException && error.kind == ArchiveErrorKind.cancelled) return true;
+      Error.throwWithStackTrace(error, stack);
+    });
+    final subscription = op.progress.listen((event) {
+      if (event.phase == ArchiveProgressPhase.writing && !writing.isCompleted) writing.complete(true);
+    });
+    try {
+      final started = await Future.any<bool>([writing.future, terminal.then((_) => false)]);
+      require(started, 'Active close did not observe a Core write');
+      await activeWriter.close();
+      require(await terminal && !op.isRunning, 'Close did not await cancellation');
+    } finally {
+      await subscription.cancel();
+    }
+  } finally {
+    await activeWriter.close();
+  }
+  require(absent(activeClose), 'Active close published staging');
   noStages(root);
   print('DART_WRITER_EXPLICIT_CLOSE_PASS');
   print('ARCHIVE_FFI_B_WRITER_COMPLETED mode=${args.length == 1 ? "nativeAssets" : "explicit"} os=${Platform.operatingSystem}');
