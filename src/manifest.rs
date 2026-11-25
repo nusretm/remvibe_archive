@@ -38,7 +38,8 @@ impl ManifestLimits {
     /// Must run before allocating a manifest buffer.
     pub fn manifest_range(&self, footer: Footer, region: ArchiveRegion) -> Result<std::ops::Range<u64>, ManifestError> {
         let range = footer.manifest_range(region)?;
-        if footer.manifest_length > self.max_manifest_bytes || usize::try_from(footer.manifest_length).is_err() {
+        if footer.manifest_length > self.max_manifest_bytes || footer.manifest_original_length > self.max_manifest_bytes
+            || usize::try_from(footer.manifest_length).is_err() || usize::try_from(footer.manifest_original_length).is_err() {
             return Err(ManifestError::Invalid("manifest exceeds byte limit"));
         }
         Ok(range)
@@ -47,7 +48,7 @@ impl ManifestLimits {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum Compression { None, Zlib }
+pub enum Compression { None, Zlib, Zstd }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -98,8 +99,8 @@ impl ArchiveManifest {
                 if p.compression == Compression::None && p.stored_size != p.original_size {
                     return Err(invalid("uncompressed payload size mismatch"));
                 }
-                if p.compression == Compression::Zlib && p.stored_size == 0 {
-                    return Err(invalid("empty zlib stream"));
+                if p.compression != Compression::None && p.stored_size == 0 {
+                    return Err(invalid("empty compressed stream"));
                 }
                 if p.sha256.len() != 64 || !p.sha256.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
                     return Err(invalid("invalid SHA-256 hex"));
@@ -125,12 +126,23 @@ impl ArchiveManifest {
     }
 
     pub fn encode(&self, manifest_offset: u64, limits: &ManifestLimits) -> Result<(Vec<u8>, Footer), ManifestError> {
+        self.encode_with_compression(manifest_offset, limits, Compression::None, 6, 3)
+    }
+
+    pub fn encode_with_compression(&self, manifest_offset: u64, limits: &ManifestLimits, compression: Compression,
+        zlib_level: u32, zstd_level: i32) -> Result<(Vec<u8>, Footer), ManifestError> {
         self.validate(manifest_offset, limits)?;
         let bytes = serde_json::to_vec(self)?;
         let manifest_length = u64::try_from(bytes.len()).map_err(|_| ManifestError::Invalid("manifest length overflow"))?;
         if manifest_length > limits.max_manifest_bytes { return Err(ManifestError::Invalid("manifest exceeds byte limit")); }
-        let footer = Footer { manifest_offset, manifest_length, manifest_sha256: Sha256::digest(&bytes).into() };
-        Ok((bytes, footer))
+        let digest = Sha256::digest(&bytes).into();
+        let stored = crate::codec::encode_manifest(bytes, compression, zlib_level, zstd_level)
+            .map_err(|_| ManifestError::Invalid("manifest compression failed"))?;
+        let stored_length = stored.len() as u64;
+        if stored_length > limits.max_manifest_bytes { return Err(ManifestError::Invalid("stored manifest exceeds byte limit")); }
+        let footer = Footer { manifest_offset, manifest_length: stored_length, manifest_original_length: manifest_length,
+            manifest_compression: compression, manifest_sha256: digest };
+        Ok((stored, footer))
     }
 
     pub fn decode(bytes: &[u8], footer: Footer, region: ArchiveRegion, limits: &ManifestLimits) -> Result<Self, ManifestError> {
@@ -138,9 +150,11 @@ impl ArchiveManifest {
         if u64::try_from(bytes.len()).ok() != Some(footer.manifest_length) {
             return Err(ManifestError::Invalid("manifest length mismatch"));
         }
-        let digest: [u8; 32] = Sha256::digest(bytes).into();
+        let decoded = crate::codec::decode_manifest(bytes, footer.manifest_compression, footer.manifest_original_length as usize)
+            .map_err(|_| ManifestError::Invalid("invalid compressed manifest"))?;
+        let digest: [u8; 32] = Sha256::digest(decoded.as_ref()).into();
         if digest != footer.manifest_sha256 { return Err(ManifestError::Invalid("manifest hash mismatch")); }
-        let manifest: Self = serde_json::from_slice(bytes)?;
+        let manifest: Self = serde_json::from_slice(decoded.as_ref())?;
         manifest.validate(footer.manifest_offset, limits)?;
         Ok(manifest)
     }

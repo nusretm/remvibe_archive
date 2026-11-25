@@ -1,7 +1,7 @@
 //! Independent Cargo consumer for ARCHIVE-RUST-01 / D.
 use remvibe_archive::{
     ArchivePath, ArchiveReader, ArchiveWriter, Compression, EntryKind, ExtractOptions,
-    MetadataCapture, MetadataPolicy, MetadataRequirement, PathComponent, ReaderOptions, WriterOptions,
+    MetadataCapture, MetadataPolicy, MetadataRequirement, PathComponent, ReaderOptions, WriterOptions, ExtractionSync,
 };
 use std::{
     ffi::{OsStr, OsString}, fs::{self, File, FileTimes}, path::{Path, PathBuf},
@@ -102,7 +102,7 @@ fn consume(archive: &Path, expected_origin: &str) -> Result<()> {
     reader.read_entry_to(index, &mut origin)?;
     assert_eq!(origin, expected_origin.as_bytes());
     assert!(matches!(&reader.entries()[index].entry, EntryKind::File { payload } if payload.compression == Compression::None));
-    assert!(reader.entries().iter().any(|e| matches!(&e.entry, EntryKind::File { payload } if payload.compression == Compression::Zlib)));
+    assert!(reader.entries().iter().any(|e| matches!(&e.entry, EntryKind::File { payload } if payload.compression == Compression::Zstd)));
     let target = fixture.0.join("restored");
     let result = reader.extract_to(&target, ExtractOptions::default())?;
     assert_eq!(result.entry_count, 7);
@@ -171,7 +171,7 @@ fn native() -> Result<()> {
         ..Default::default()
     };
     let target = fixture.0.join("restored");
-    let result = reader.extract_to(&target, ExtractOptions { metadata_policy: Some(policy) })?;
+    let result = reader.extract_to(&target, ExtractOptions { metadata_policy: Some(policy), ..Default::default() })?;
     let actual_names: Vec<OsString> = fs::read_dir(&target)?.map(|e| e.map(|x| x.file_name())).collect::<std::io::Result<_>>()?;
     assert_eq!(actual_names, vec![name.clone()]);
     let actual = target.join(name);
@@ -205,17 +205,18 @@ fn benchmark(parent: &Path) -> Result<()> {
             if index % 100 == 0 { fs::create_dir(&sub)?; }
             fs::write(sub.join(format!("file-{index:05}.bin")), data(index))?;
         }
-        for compression in [Compression::Zlib, Compression::None] {
+        for compression in [Compression::Zlib, Compression::Zstd, Compression::None] {
             let archive = fixture.0.join(format!("{count}-{compression:?}.rva"));
-            let target = fixture.0.join(format!("{count}-{compression:?}-restored"));
             let start = Instant::now();
             let mut writer = ArchiveWriter::new(&archive, WriterOptions { compression, ..Default::default() })?;
             writer.add_directory(&source, rel("files"), true)?;
             let written = writer.finish()?;
             let pack = start.elapsed();
+            for sync in [ExtractionSync::PerFile, ExtractionSync::Buffered] {
+            let target = fixture.0.join(format!("{count}-{compression:?}-{sync:?}-restored"));
             let start = Instant::now();
             let mut reader = ArchiveReader::open(&archive, ReaderOptions::default())?;
-            let extracted = reader.extract_to(&target, ExtractOptions::default())?;
+            let extracted = reader.extract_to(&target, ExtractOptions { sync, ..Default::default() })?;
             let unpack = start.elapsed();
             let original_bytes = (count * FILE_BYTES) as u64;
             assert_eq!(written.entry_count, count + count / 100 + 1);
@@ -227,12 +228,13 @@ fn benchmark(parent: &Path) -> Result<()> {
                 let path = target.join("files").join(format!("group-{:04}", index / 100)).join(format!("file-{index:05}.bin"));
                 assert_eq!(fs::read(path)?, data(index));
             }
-            println!("BENCH files={count} compression={compression:?} source_bytes={original_bytes} archive_bytes={} pack_ms={:.3} extract_ms={:.3} archive_pct={:.2} pack_files_s={:.2} extract_files_s={:.2} verified=PASS",
+            println!("BENCH files={count} compression={compression:?} sync={sync:?} source_bytes={original_bytes} archive_bytes={} pack_ms={:.3} extract_ms={:.3} archive_pct={:.2} pack_files_s={:.2} extract_files_s={:.2} verified=PASS",
                 written.archive_bytes, pack.as_secs_f64() * 1000.0, unpack.as_secs_f64() * 1000.0,
                 written.archive_bytes as f64 * 100.0 / original_bytes as f64,
                 count as f64 / pack.as_secs_f64(), count as f64 / unpack.as_secs_f64());
-            fs::remove_file(&archive)?;
             fs::remove_dir_all(&target)?;
+            }
+            fs::remove_file(&archive)?;
         }
         fs::remove_dir_all(&source)?;
     }

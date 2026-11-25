@@ -100,7 +100,7 @@ fn main() {
     opened.clear_progress_handler();
     let single = root.join("single.txt");
     let index = find(&opened, "implicit/plain.txt");
-    let single_result = opened.extract_entry_to(index, &single, ExtractOptions { metadata_policy: None }).unwrap();
+    let single_result = opened.extract_entry_to(index, &single, ExtractOptions { metadata_policy: None, ..Default::default() }).unwrap();
     assert!(single_result.metadata.is_empty());
     assert_eq!(fs::read(&single).unwrap(), b"RVA V3");
     no_stage(&root);
@@ -170,7 +170,7 @@ fn main() {
     let mut missing_reader = reader(rebuild(&bytes[HEADER_LEN..footer.manifest_offset as usize], &missing));
     let required = root.join("required");
     let policy = MetadataPolicy { created_time: MetadataRequirement::Required, ..Default::default() };
-    assert!(matches!(missing_reader.extract_to(&required, ExtractOptions { metadata_policy: Some(policy) }), Err(ReaderError::Metadata { .. })));
+    assert!(matches!(missing_reader.extract_to(&required, ExtractOptions { metadata_policy: Some(policy), ..Default::default() }), Err(ReaderError::Metadata { .. })));
     assert!(!required.exists());
     no_stage(&root);
 
@@ -201,5 +201,5 @@ fn main() {
         assert!(PathComponent::Utf8("name. ".into()).to_native().is_err());
     }
     no_stage(&root);
-    println!("PASS: corruption, strict zlib bounds, cancellation, destination conflict, required metadata failure and target path collisions");
+    println!("PASS: corruption, strict zstd bounds, cancellation, destination conflict, required metadata failure and target path collisions");
 }

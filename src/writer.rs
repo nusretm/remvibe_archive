@@ -26,8 +26,9 @@ pub enum MetadataCapture { Basic, Full }
 #[derive(Debug, Clone)]
 pub struct WriterOptions {
     pub compression: Compression,
-    /// Zlib level 0..=9. Ignored by uncompressed entries.
-    pub compression_level: u32,
+    pub zlib_level: u32,
+    pub zstd_level: i32,
+    pub manifest_compression: Compression,
     pub buffer_size: usize,
     pub metadata_capture: MetadataCapture,
     pub limits: ManifestLimits,
@@ -35,7 +36,7 @@ pub struct WriterOptions {
 }
 impl Default for WriterOptions {
     fn default() -> Self {
-        Self { compression: Compression::Zlib, compression_level: 6, buffer_size: 1024 * 1024,
+        Self { compression: Compression::Zstd, zlib_level: 6, zstd_level: 3, manifest_compression: Compression::Zstd, buffer_size: 1024 * 1024,
             metadata_capture: MetadataCapture::Basic, limits: ManifestLimits::default(),
             cancellation: CancellationToken::new() }
     }
@@ -144,7 +145,7 @@ fn regular_item(item: &FileSystemItem) -> bool {
 impl ArchiveWriter {
     pub fn new(destination: &Path, options: WriterOptions) -> Result<Self, WriterError> {
         options.cancellation.check()?;
-        if options.compression_level > 9 || options.buffer_size == 0 || options.buffer_size > 64 * 1024 * 1024 {
+        if options.zlib_level > 9 || !(1..=19).contains(&options.zstd_level) || options.buffer_size == 0 || options.buffer_size > 64 * 1024 * 1024 {
             return Err(WriterError::Invalid("invalid compression level or buffer size"));
         }
         require_absolute(destination)?;
@@ -272,7 +273,13 @@ impl ArchiveWriter {
         let sha256 = match compression {
             Compression::None => copy_stream(&mut input, &mut *output, &mut self.buffer, expected, source, &stage, token, &mut on_chunk)?,
             Compression::Zlib => {
-                let mut encoder = ZlibEncoder::new(&mut *output, flate2::Compression::new(self.options.compression_level));
+                let mut encoder = ZlibEncoder::new(&mut *output, flate2::Compression::new(self.options.zlib_level));
+                let hash = copy_stream(&mut input, &mut encoder, &mut self.buffer, expected, source, &stage, token, &mut on_chunk)?;
+                encoder.finish().map_err(|e| io_at(&stage, e))?;
+                hash
+            }
+            Compression::Zstd => {
+                let mut encoder = zstd::stream::write::Encoder::new(&mut *output, self.options.zstd_level).map_err(|e| io_at(&stage, e))?;
                 let hash = copy_stream(&mut input, &mut encoder, &mut self.buffer, expected, source, &stage, token, &mut on_chunk)?;
                 encoder.finish().map_err(|e| io_at(&stage, e))?;
                 hash
@@ -356,7 +363,8 @@ impl ArchiveWriter {
         let stage = self.stage.as_ref().ok_or(WriterError::Closed)?.clone();
         let mut output = self.output.take().ok_or(WriterError::Closed)?;
         let offset = output.stream_position().map_err(|e| io_at(&stage, e))?;
-        let (manifest, footer) = self.manifest.encode(offset, &self.options.limits)?;
+        let (manifest, footer) = self.manifest.encode_with_compression(offset, &self.options.limits, self.options.manifest_compression,
+            self.options.zlib_level, self.options.zstd_level)?;
         self.options.cancellation.check()?;
         output.write_all(&manifest).map_err(|e| io_at(&stage, e))?;
         output.write_all(&footer.encode()).map_err(|e| io_at(&stage, e))?;

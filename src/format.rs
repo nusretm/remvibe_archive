@@ -1,11 +1,12 @@
 //! Fixed RVA V3 envelope and checked region-relative bounds.
 use std::{error::Error, fmt};
+use crate::manifest::Compression;
 
 pub const HEADER_LEN: usize = 16;
-pub const FOOTER_LEN: usize = 56;
+pub const FOOTER_LEN: usize = 72;
 pub const VERSION: u16 = 3;
 const HEADER_MAGIC: [u8; 8] = *b"RVA3\r\n\x1a\n";
-const FOOTER_MAGIC: [u8; 8] = *b"RVA3END\n";
+const FOOTER_MAGIC: [u8; 8] = *b"RVA3CMP\n";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormatError {
@@ -87,6 +88,8 @@ impl ArchiveRegion {
 pub struct Footer {
     pub manifest_offset: u64,
     pub manifest_length: u64,
+    pub manifest_original_length: u64,
+    pub manifest_compression: Compression,
     pub manifest_sha256: [u8; 32],
 }
 
@@ -96,7 +99,9 @@ impl Footer {
         bytes[..8].copy_from_slice(&FOOTER_MAGIC);
         bytes[8..16].copy_from_slice(&self.manifest_offset.to_be_bytes());
         bytes[16..24].copy_from_slice(&self.manifest_length.to_be_bytes());
-        bytes[24..].copy_from_slice(&self.manifest_sha256);
+        bytes[24..32].copy_from_slice(&self.manifest_original_length.to_be_bytes());
+        bytes[32] = match self.manifest_compression { Compression::None => 0, Compression::Zlib => 1, Compression::Zstd => 2 };
+        bytes[40..].copy_from_slice(&self.manifest_sha256);
         bytes
     }
 
@@ -107,10 +112,16 @@ impl Footer {
         let mut digest = [0; 32];
         offset.copy_from_slice(&bytes[8..16]);
         length.copy_from_slice(&bytes[16..24]);
-        digest.copy_from_slice(&bytes[24..]);
+        let mut original = [0; 8];
+        original.copy_from_slice(&bytes[24..32]);
+        if bytes[33..40].iter().any(|&b| b != 0) { return Err(FormatError::NonzeroReserved); }
+        let manifest_compression = match bytes[32] { 0 => Compression::None, 1 => Compression::Zlib, 2 => Compression::Zstd, _ => return Err(FormatError::InvalidManifestRange) };
+        digest.copy_from_slice(&bytes[40..]);
         Ok(Self {
             manifest_offset: u64::from_be_bytes(offset),
             manifest_length: u64::from_be_bytes(length),
+            manifest_original_length: u64::from_be_bytes(original),
+            manifest_compression,
             manifest_sha256: digest,
         })
     }
@@ -118,7 +129,8 @@ impl Footer {
     /// Structural check only; manifest size limit, hash and schema checked separately.
     pub fn manifest_range(self, region: ArchiveRegion) -> Result<std::ops::Range<u64>, FormatError> {
         if self.manifest_offset < HEADER_LEN as u64
-            || self.manifest_length == 0
+            || self.manifest_length == 0 || self.manifest_original_length == 0
+            || (self.manifest_compression == Compression::None && self.manifest_length != self.manifest_original_length)
             || self.manifest_offset.checked_add(self.manifest_length) != Some(region.footer_offset())
         {
             return Err(FormatError::InvalidManifestRange);

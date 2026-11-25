@@ -15,6 +15,8 @@ fn main() {
     let footer = Footer {
         manifest_offset: HEADER_LEN as u64 + payload_length,
         manifest_length,
+        manifest_original_length: manifest_length,
+        manifest_compression: remvibe_archive::Compression::None,
         manifest_sha256: [0xab; 32], // Codec sample, not a real verified manifest hash.
     };
     assert_eq!(Footer::decode(&footer.encode()).unwrap(), footer);

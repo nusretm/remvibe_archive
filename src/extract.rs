@@ -5,13 +5,18 @@ use remvibe_filesystem_core::{FileSystemService, MetadataApplyResult, MetadataPo
 use std::{collections::HashMap, fs::{self, File, OpenOptions}, io::{self, Read, Seek},
     path::{Path, PathBuf}, sync::atomic::{AtomicU64, Ordering}};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtractionSync { PerFile, Buffered }
+
 #[derive(Debug, Clone)]
 pub struct ExtractOptions {
     /// None: defer all metadata application to caller (e.g. multi-archive transfer).
     pub metadata_policy: Option<MetadataPolicy>,
+    /// Buffered checks writes and integrity but does not force stable storage per file.
+    pub sync: ExtractionSync,
 }
 impl Default for ExtractOptions {
-    fn default() -> Self { Self { metadata_policy: Some(MetadataPolicy::default()) } }
+    fn default() -> Self { Self { metadata_policy: Some(MetadataPolicy::default()), sync: ExtractionSync::PerFile } }
 }
 #[derive(Debug)]
 pub struct EntryMetadataResult {
@@ -146,7 +151,7 @@ impl<R: Read + Seek> ArchiveReader<R> {
             let target = stage.path().to_owned();
             self.event(&op, ReaderPhase::Preparing, None, 0, None);
             self.check_cancel()?;
-            self.extract_file(index, &target, &mut op)?;
+            self.extract_file(index, &target, &mut op, options.sync)?;
             let mut metadata = Vec::new();
             if let Some(policy) = &options.metadata_policy {
                 metadata.push(self.apply_entry_metadata(index, &target, false, policy, &mut stage, &op)?);
@@ -192,7 +197,7 @@ impl<R: Read + Seek> ArchiveReader<R> {
             if matches!(&self.entries()[index].entry, EntryKind::Directory) {
                 self.complete_directory(index, op)?;
             } else {
-                self.extract_file(index, target, op)?;
+                self.extract_file(index, target, op, options.sync)?;
             }
         }
         // No permissions are applied until all payloads have been verified.
@@ -214,12 +219,12 @@ impl<R: Read + Seek> ArchiveReader<R> {
         }
         self.publish_stage(destination, stage, op, metadata)
     }
-    fn extract_file(&mut self, index: usize, path: &Path, op: &mut Operation) -> Result<(), ReaderError> {
+    fn extract_file(&mut self, index: usize, path: &Path, op: &mut Operation, sync: ExtractionSync) -> Result<(), ReaderError> {
         self.check_cancel()?;
         // Files were exclusively reserved by this operation in a private stage.
         let mut file: File = OpenOptions::new().write(true).open(path)?;
         self.pump(index, &mut file, op, ReaderPhase::Extracting)?;
-        file.sync_all()?;
+        if sync == ExtractionSync::PerFile { file.sync_all()?; }
         Ok(())
     }
     fn apply_entry_metadata(&mut self, index: usize, target: &Path, directory: bool, policy: &MetadataPolicy,

@@ -289,6 +289,13 @@ impl<R: Read + Seek> ArchiveReader<R> {
                     if used == 0 && produced == 0 { return Err(bad("truncated or stalled zlib stream")); }
                 }
             }
+            Compression::Zstd => {
+                crate::codec::decode_zstd(&mut self.source, payload.stored_size, &mut self.input, &mut self.output,
+                    || check_cancel(token), &mut accept).map_err(|e| match e {
+                        ReaderError::Io(ref io) if io.kind() == io::ErrorKind::InvalidData => bad("invalid or trailing zstd frame"),
+                        other => other,
+                    })?;
+            }
         }
         drop(accept);
         check_cancel(token)?;

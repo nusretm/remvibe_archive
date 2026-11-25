@@ -45,6 +45,10 @@ fn inspect(path: &Path, source: &Path) -> ArchiveManifest {
                     decoder.read_to_end(&mut actual).unwrap();
                     assert_eq!(decoder.total_in(), payload.stored_size);
                 }
+                Compression::Zstd => {
+                    let mut decoder = zstd::stream::read::Decoder::new((&mut file).take(payload.stored_size)).unwrap();
+                    decoder.read_to_end(&mut actual).unwrap();
+                }
             }
             assert_eq!(actual, original);
             assert_eq!(payload.original_size, original.len() as u64);
@@ -99,7 +103,7 @@ fn main() {
     assert!(events.iter().filter(|e| e.phase == WriterPhase::Writing && e.path.as_ref() == Some(&rel("tree/large.bin"))).count() >= 3);
     drop(events);
     no_stage(&out);
-    println!("PASS: streaming RVA writer, zlib/none, full metadata, recursive/nonrecursive/empty entries and payload SHA-256");
+    println!("PASS: streaming RVA writer, zstd/none, full metadata, recursive/nonrecursive/empty entries and payload SHA-256");
 
     let cancelled = out.join("cancelled.rva");
     let token = CancellationToken::new();
