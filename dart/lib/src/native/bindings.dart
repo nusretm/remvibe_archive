@@ -34,7 +34,9 @@ class ArchiveNativeBindings {
       if (version != expectedAbi) throw StateError('ABI $version does not match $expectedAbi');
       for (final symbol in ['core_info', 'native_path_roundtrip',
           'operation_recv', 'operation_cancel', 'operation_close',
-          'buffer_data', 'buffer_len', 'buffer_free']) {
+          'buffer_data', 'buffer_len', 'buffer_free',
+          'writer_create', 'writer_add_file', 'writer_add_directory',
+          'writer_finish', 'writer_abort', 'writer_close']) {
         if (!library.providesSymbol('$prefix$symbol')) {
           throw StateError('Missing native symbol $prefix$symbol');
         }

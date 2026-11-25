@@ -4,23 +4,52 @@ import 'dart:isolate';
 import 'models.dart';
 import 'native/bindings.dart';
 
-Future<Object?> _call(String? library, String operation, Map<String, Object?>? input) =>
+Future<Object?> callArchiveNative(String? library, String operation, Map<String, Object?>? input) =>
     Isolate.run(() => ArchiveNativeBindings.load(library).call(operation, input));
 
-Future<String> _start(String? library, String operation, Map<String, Object?>? input) async {
-  final value = await _call(library, operation, input);
+String archiveHandle(Object? value, String operation) {
   try {
     final handle = jsonObject(value)['handle'] as String;
     final id = BigInt.parse(handle);
-    if (id <= BigInt.zero || id.toString() != handle) throw const FormatException('Invalid operation handle');
+    if (id <= BigInt.zero || id.toString() != handle ||
+        id > BigInt.parse('18446744073709551615')) {
+      throw const FormatException('Invalid handle');
+    }
     return handle;
   } catch (error) {
     throw ArchiveBridgeException(ArchiveBridgeErrorKind.invalidResponse, operation, error.toString());
   }
 }
 
-/// Owns one native operation. Await result even after a cancellation request.
-/// A establishes terminal result delivery; B/C introduce actual Core progress.
+Future<String> _start(String? library, String operation, Map<String, Object?>? input) async =>
+    archiveHandle(await callArchiveNative(library, operation, input), operation);
+
+/// The receiver owns no native pointer across calls. One event in flight;
+/// credit/stop messages keep the isolate mailbox bounded even during bursts.
+Future<void> _nativeReceiver((String?, String, SendPort) args) async {
+  final (library, handle, output) = args;
+  final credits = ReceivePort();
+  final iterator = StreamIterator<dynamic>(credits);
+  output.send(credits.sendPort);
+  try {
+    final bindings = ArchiveNativeBindings.load(library);
+    while (true) {
+      final event = jsonObject(bindings.call('operation_recv', {'handle': handle}));
+      output.send(event);
+      if (event['kind'] == 'terminal') break;
+      if (!await iterator.moveNext() || iterator.current != true) break;
+    }
+  } catch (error) {
+    output.send(['nativeError', error]);
+  } finally {
+    await iterator.cancel();
+    credits.close();
+  }
+}
+
+/// Owns one native operation. Await result even after requesting cancel.
+/// Progress is a broadcast notification stream; subscribe promptly. Terminal
+/// result is authoritative and resolves after the native worker was joined.
 class ArchiveOperation<T> {
   final String? _library;
   final Future<String> _handle;
@@ -39,31 +68,62 @@ class ArchiveOperation<T> {
     if (_done) return;
     final handle = await _handle;
     if (_done) return;
-    await _call(_library, 'operation_cancel', {'handle': handle});
+    await callArchiveNative(_library, 'operation_cancel', {'handle': handle});
   }
 
   Future<T> _receive(String operation, T Function(Object?) decode) async {
     String? handle;
+    ReceivePort? port;
+    SendPort? credits;
     try {
       handle = await _handle;
-      // The blocking receive and independent cancel/close never run on UI.
-      final value = await _call(_library, 'operation_recv', {'handle': handle});
-      final event = jsonObject(value);
-      if (event['kind'] != 'terminal') {
-        throw ArchiveBridgeException(ArchiveBridgeErrorKind.invalidResponse, operation, 'Expected terminal event');
+      final receiver = ReceivePort();
+      port = receiver;
+      await Isolate.spawn(
+        _nativeReceiver, (_library, handle, receiver.sendPort),
+        onError: receiver.sendPort, onExit: receiver.sendPort,
+      );
+      await for (final message in receiver) {
+        if (message is SendPort) {
+          credits = message;
+          continue;
+        }
+        if (message is List && message.length == 2 && message.first == 'nativeError') {
+          throw message[1] as Object;
+        }
+        if (message is! Map<String, dynamic>) {
+          throw ArchiveBridgeException(ArchiveBridgeErrorKind.invalidResponse, operation,
+              'Native receiver exited without a terminal result: $message');
+        }
+        try {
+          switch (message['kind']) {
+            case 'progress':
+              _progress.add(ArchiveProgress.fromJson(message['value']));
+              credits?.send(true);
+              break;
+            case 'terminal':
+              final terminal = ArchiveNativeBindings.unwrap(operation, message['result']);
+              return decode(terminal);
+            default:
+              throw const FormatException('Unknown native operation event');
+          }
+        } on ArchiveException {
+          rethrow;
+        } on ArchiveBridgeException {
+          rethrow;
+        } catch (error) {
+          throw ArchiveBridgeException(ArchiveBridgeErrorKind.invalidResponse, operation, error.toString());
+        }
       }
-      final terminal = ArchiveNativeBindings.unwrap(operation, event['result']);
-      try {
-        return decode(terminal);
-      } catch (error) {
-        throw ArchiveBridgeException(ArchiveBridgeErrorKind.invalidResponse, operation, error.toString());
-      }
+      throw ArchiveBridgeException(ArchiveBridgeErrorKind.invalidResponse, operation, 'Missing terminal event');
     } finally {
+      credits?.send(false);
+      port?.close();
       try {
-        if (handle != null) await _call(_library, 'operation_close', {'handle': handle});
+        if (handle != null) await callArchiveNative(_library, 'operation_close', {'handle': handle});
       } finally {
         _done = true;
-        // A paused or absent progress listener must not keep native resources alive.
+        // Paused/absent subscribers must not keep native resources alive.
         unawaited(_progress.close());
       }
     }
