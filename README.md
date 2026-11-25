@@ -11,4 +11,4 @@ Native Rust archive library for the new RVA V3 (.rva) format. Direct Cargo depen
 
 Read [AGENTS.md](AGENTS.md), [WORKING_RULES.md](WORKING_RULES.md), [current target](docs/continuity/CURRENT_TARGET.md), [ARCHIVE-RUST-01](docs/continuity/ARCHIVE_RUST_01.md) and [RVA V3 format](docs/RVA_V3_FORMAT.md).
 
-Checkpoint A is in progress; the foundation implements envelope and manifest encoding/decoding, bounded region checks, native path and metadata codecs. No working archive reader/writer yet. Initial envelope probe passed on Windows/Linux; expanded foundation acceptance pending.
+Checkpoint A is in progress; the foundation implements envelope and manifest encoding/decoding, bounded region checks, native path and metadata codecs. No working archive reader/writer yet. Both foundation probes and cargo check passed on Windows and Ubuntu at the expanded foundation revision; committing the resolved Cargo.lock remains pending before checkpoint closure.
