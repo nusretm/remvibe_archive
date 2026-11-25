@@ -122,7 +122,8 @@ fn local() -> Result<()> {
         expected.extend_from_slice(&fs::read(part(&archive, index))?[SPLIT_PART_HEADER_LEN as usize..]);
     }
     let first = fs::read(part(&archive, 1))?;
-    assert_eq!(&first[8..40], Sha256::digest(&expected).as_slice());
+    let digest: [u8; 32] = Sha256::digest(&expected).into();
+    assert_eq!(&first[8..40], &digest);
     let token = CancellationToken::new();
     let mut stream = SplitReader::open(&archive, &token)?;
     assert_eq!(stream.part_count(), result.part_count);
@@ -159,7 +160,13 @@ fn local() -> Result<()> {
     assert!(tiny_result.part_count >= 3);
     assert_eq!(ArchiveReader::open_split(&tiny, ReaderOptions::default())?.verify()?.entry_count, 0);
     let one = root.join("one.parts");
-    assert_eq!(ArchiveWriter::new(&one, options(PART_SIZE))?.finish()?.part_count, 1);
+    let one_result = ArchiveWriter::new(&one, options(PART_SIZE))?.finish()?;
+    assert_eq!(one_result.part_count, 1);
+    let exact = root.join("exact.parts");
+    let exact_size = one_result.archive_bytes + SPLIT_PART_HEADER_LEN;
+    let exact_result = ArchiveWriter::new(&exact, options(exact_size))?.finish()?;
+    assert_eq!(exact_result.part_count, 1);
+    assert_eq!(fs::metadata(part(&exact, 1))?.len(), exact_size);
     assert_eq!(ArchiveReader::open_split(&one, ReaderOptions::default())?.verify()?.entry_count, 0);
     assert!(ArchiveWriter::new(&root.join("invalid.parts"), options(SPLIT_PART_HEADER_LEN)).is_err());
     println!("PASS: empty and one-part split sets, footer across part boundaries, invalid size rejected");
@@ -231,6 +238,19 @@ fn local() -> Result<()> {
     writer.add_file(&source, rel("source.bin"))?;
     writer.abort()?;
     assert!(!abandoned.exists());
+    no_stage(root)?;
+
+    let cancelled_extract = root.join("cancelled-extraction");
+    let token = CancellationToken::new();
+    let mut reader = ArchiveReader::open_split(&archive, ReaderOptions {
+        cancellation: token.clone(), buffer_size: 113, ..Default::default()
+    })?;
+    let callback = token.clone();
+    reader.set_progress_handler(move |p| {
+        if p.phase == ReaderPhase::Extracting && p.output_bytes >= 8192 { callback.cancel(); }
+    });
+    assert!(matches!(reader.extract_to(&cancelled_extract, ExtractOptions::default()), Err(ReaderError::Cancelled)));
+    assert!(!cancelled_extract.exists());
     no_stage(root)?;
 
     let token = CancellationToken::new();
