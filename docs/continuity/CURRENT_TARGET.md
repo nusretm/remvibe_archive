@@ -1,6 +1,6 @@
 # RemVibe Archive — current target
 
-2026-11-25: **ARCHIVE-RUST-01 A–F ACCEPTED AND CLOSED; ARCHIVE-FFI-01 CHECKPOINT A AUTHORIZED.** Main f81c41091e6e39d8a4e504bb81df568ddb9ae434 verified; operator approved architecture and A–E on 2026-11-25, with implementation limited to A on feature/archive-ffi-01.
+2026-11-25: **ARCHIVE-RUST-01 A–F ACCEPTED AND CLOSED; ARCHIVE-FFI-01 CHECKPOINT A SOURCE IMPLEMENTED; RUNTIME ACCEPTANCE PENDING.** Main f81c41091e6e39d8a4e504bb81df568ddb9ae434 verified; operator approved architecture and A–E on 2026-11-25, with implementation limited to A on feature/archive-ffi-01.
 
 ## Accepted baseline
 - Source HEAD 1a07cc6d5f993ca18314fd78c10449c89ec63ca0; source tree 0072d4061a9c1f0e04805c5c3c1d8979e16ee3d9; final acceptance continuity 26f5503e659739722acf797fa99172ddbf8db18e.
@@ -9,6 +9,6 @@
 - RVA V3, Single default and Split/Embedded support, Zstd level 3 file/manifest default, Zlib/None retained, Buffered extraction default and explicit PerFile. No NTA V2 compatibility; existing legacy consumers pinned until migration. No macOS runtime, static linkage inspection, crash recovery or large-volume split benchmark claimed.
 
 ## Next target
-[ARCHIVE-FFI-01](ARCHIVE_FFI_01.md): root remvibe_archive remains direct Rust dependency; Dart package remvibe_archive_dart at dart/, private native crate remvibe_archive_ffi at dart/native/. Approved A–E plan in ARCHIVE_FFI_01.md. A only: independent FFI foundation, native loading, versioned ABI, paths, errors, handles/operation substrate and focused probe. No Writer/Reader functionality or consumer migration. B requires explicit A acceptance and authorization.
+[ARCHIVE-FFI-01](ARCHIVE_FFI_01.md): root remvibe_archive remains direct Rust dependency; Dart package remvibe_archive_dart at dart/, private native crate remvibe_archive_ffi at dart/native/. Approved A–E plan in ARCHIVE_FFI_01.md. A only: independent FFI foundation, native loading, versioned ABI, paths, errors, handles/operation substrate and focused probe. No Writer/Reader functionality or consumer migration. A source d0b35c3654b8ed698f4a5266261bcecd63524770 implements ABI v1, native path codec, independent cdylib and build hook, typed default inspection via native operation handle and explicit cleanup. Generate actual private Cargo.lock and dart/pubspec.lock in the existing Windows checkout, commit only generated locks; Windows/Ubuntu locked builds/analyze and both loading modes pending. No running archive cancellation/progress, writer/reader or distribution acceptance claimed. B requires explicit A acceptance and authorization.
 
 Wider sequence: UI-DATAGRID-MULTISELECT-01, FS-CORE-01, FS-FFI-01, FS-FLUTTER-01, ARCHIVE-RUST-01 completed acceptance; ARCHIVE-FFI-01; separate Installer/Updater Rust architecture evaluation; ARCHIVE-MIGRATION-01; FT-NETWORKING-01, FT-CORE-01, FT-FFI-01, UC-FILESYSTEM-01A–E. Deployment dormant. No unrelated implementation authorized.
