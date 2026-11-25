@@ -125,10 +125,24 @@ fn main() {
     assert!(!failed.exists());
     no_stage(&root);
 
+    // Repeat the same corruption checks on independently encoded Zlib and Zstd.
+    for compression in [Compression::Zlib, Compression::Zstd] {
     let large = find(&opened, "tree/large.bin");
     let mut one = opened.entries()[large].clone();
     let EntryKind::File { payload } = &mut one.entry else { panic!("file expected"); };
-    let mut compressed = bytes[payload.offset as usize..(payload.offset + payload.stored_size) as usize].to_vec();
+    let mut compressed = match compression {
+        Compression::Zlib => {
+            use std::io::Write;
+            let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::new(6));
+            encoder.write_all(&content).unwrap();
+            encoder.finish().unwrap()
+        }
+        Compression::Zstd => zstd::bulk::compress(&content, 3).unwrap(),
+        Compression::None => unreachable!(),
+    };
+    let original_compressed = compressed.clone();
+    payload.compression = compression;
+    payload.stored_size = compressed.len() as u64;
     payload.offset = HEADER_LEN as u64;
     let mut manifest = ArchiveManifest { entries: vec![one] };
     compressed.push(0);
@@ -138,14 +152,14 @@ fn main() {
     if let EntryKind::File { payload } = &mut manifest.entries[0].entry { payload.stored_size -= 2; }
     assert!(matches!(reader(rebuild(&compressed, &manifest)).verify(), Err(ReaderError::Integrity { .. })));
     // Restore full zlib stream but declare a smaller output size.
-    let EntryKind::File { payload: original } = &opened.entries()[large].entry else { panic!("file expected"); };
-    let compressed = &bytes[original.offset as usize..(original.offset + original.stored_size) as usize];
+    let compressed = &original_compressed;
     if let EntryKind::File { payload } = &mut manifest.entries[0].entry {
-        payload.stored_size = original.stored_size;
+        payload.stored_size = compressed.len() as u64;
         payload.original_size = 1;
     }
     manifest.entries[0].metadata.size = Some(1);
     assert!(matches!(reader(rebuild(compressed, &manifest)).verify(), Err(ReaderError::Integrity { .. })));
+    }
 
     let cancelled = root.join("cancelled");
     let token = CancellationToken::new();
@@ -201,5 +215,5 @@ fn main() {
         assert!(PathComponent::Utf8("name. ".into()).to_native().is_err());
     }
     no_stage(&root);
-    println!("PASS: corruption, strict zstd bounds, cancellation, destination conflict, required metadata failure and target path collisions");
+    println!("PASS: corruption, strict zlib/zstd bounds, cancellation, destination conflict, required metadata failure and target path collisions");
 }

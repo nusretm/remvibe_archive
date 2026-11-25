@@ -44,7 +44,7 @@ pub(crate) fn decode_zstd<E: From<io::Error>>(
             source.read_exact(&mut input[..n])?;
             remaining -= n as u64; pos = 0; end = n;
         }
-        let status = decoder.run_on_buffers(&input[pos..end], output)?;
+        let status = decoder.run_on_buffers(&input[pos..end], output).map_err(|_| invalid("invalid zstd stream"))?;
         pos += status.bytes_read;
         accept(&output[..status.bytes_written])?;
         if status.remaining == 0 {

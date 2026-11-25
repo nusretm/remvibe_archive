@@ -1,6 +1,6 @@
-# RVA V3 format — checkpoint A working specification
+# RVA V3 format — checkpoint E working specification
 
-New .rva container, no NTA compatibility. All binary integers are unsigned big endian. Layout: fixed 16-byte header, contiguous per-file payloads, UTF-8 JSON manifest, fixed 56-byte footer. Offsets are relative to start of the RVA region (not physical host file). No external bytes in region. Reader must support standalone or bounded embedded region, seek to its region end for footer. All arithmetic checked.
+New .rva container, no NTA compatibility. All binary integers are unsigned big endian. Layout: fixed 16-byte header, contiguous per-file payloads, UTF-8 JSON manifest, fixed 72-byte footer. Offsets are relative to start of the RVA region (not physical host file). No external bytes in region. Reader must support standalone or bounded embedded region, seek to its region end for footer. All arithmetic checked.
 
 ## Header (16 bytes)
 
@@ -11,20 +11,23 @@ New .rva container, no NTA compatibility. All binary integers are unsigned big e
 | 10 | 2 | flags = 0 in first profile |
 | 12 | 4 | reserved = 0 |
 
-## Footer (56 bytes)
+## Footer (72 bytes)
 
 | Offset | Length | Value |
 |---|---|---|
-| 0 | 8 | RVA3END followed by LF |
+| 0 | 8 | RVA3CMP followed by LF |
 | 8 | 8 | manifest offset (region-relative) |
-| 16 | 8 | manifest byte length (nonzero) |
-| 24 | 32 | SHA-256 digest of exact manifest bytes |
+| 16 | 8 | stored manifest byte length (nonzero) |
+| 24 | 8 | original JSON manifest byte length (nonzero) |
+| 32 | 1 | codec: 0 None, 1 Zlib, 2 Zstd |
+| 33 | 7 | reserved = 0 |
+| 40 | 32 | SHA-256 of exact original UTF-8 JSON bytes |
 
-Header and footer magic/version/flags checked; region at least 73 bytes; manifest offset >= 16, nonzero length, offset + length == region length - 56. Region start + length must fit physical source. Reject unknown flags/reserved values. ManifestLimits::manifest_range checks configured byte limit and native usize representability before allocation. Footer magic is a new implementation decision, review in A.
+Header and footer magic/version/flags checked; region at least 89 bytes; manifest offset >= 16, nonzero length, offset + length == region length - 72. Region start + length must fit physical source. Reject unknown flags/reserved values. ManifestLimits::manifest_range checks configured byte limit and native usize representability before allocation. Footer magic is a new implementation decision, review in A.
 
 ## Manifest / payload
 
-UTF-8 JSON object {"entries":[...]} (no unknown fields). Entry order determines file payload order; directory entries consume no bytes. Each entry has path, metadata and entry. The entry object is {"kind":"directory"} or {"kind":"file","payload":{"offset":16,"storedSize":3,"originalSize":3,"compression":"none","sha256":"<64 lowercase hex digits>"}}. Compression is "none" or "zlib". Digests cover original uncompressed bytes; actual payload verification and strict zlib stream consumption belong to B/C. Empty files are explicit, empty zlib streams still have a nonzero stored length; no unexplained payload gaps, overlap or trailing payload bytes. Checked u64 totals; none requires equal stored/original size. Optional metadata.size must equal file originalSize. Manifest hash is over the exact JSON bytes, not reserialized data. Hashes are integrity, not publisher authentication.
+UTF-8 JSON object {"entries":[...]} (no unknown fields). Entry order determines file payload order; directory entries consume no bytes. Each entry has path, metadata and entry. The entry object is {"kind":"directory"} or {"kind":"file","payload":{"offset":16,"storedSize":3,"originalSize":3,"compression":"none","sha256":"<64 lowercase hex digits>"}}. Compression is "none", "zlib" or "zstd". Digests cover original uncompressed bytes; actual payload verification and strict zlib stream consumption belong to B/C. Empty files are explicit, empty zlib streams still have a nonzero stored length; no unexplained payload gaps, overlap or trailing payload bytes. Checked u64 totals; none requires equal stored/original size. Optional metadata.size must equal file originalSize. Manifest hash is over the exact JSON bytes, not reserialized data. Hashes are integrity, not publisher authentication.
 
 Path is a nonempty ordered array of {"encoding":"utf8","value":"name"}, {"encoding":"unixBytes","value":"<standard padded base64>"} or {"encoding":"windowsUtf16","value":"<standard padded base64 of little-endian u16 units>"}. UTF-8 is mandatory when the name is valid Unicode; raw forms only for non-Unicode names. Reject empty, dot/dotdot, NUL, slash, invalid raw encoding, duplicate paths and file ancestors. Raw Windows components also reject backslash and colon. UTF-8 names can contain Unix-valid backslashes and colons; target conversion rejects Windows separators/prefixes and forbidden characters, and C must still verify device aliases, trailing dot/space and actual target collisions before opening files. Foreign raw encodings cannot be restored on an incompatible target. Native source paths are relative normal components; Rust Path component iteration normalizes redundant separators/interior dot components, never parent traversal. No lossy conversion. Ancestors may be implicit if not present as directory entries; explicit directory entries preserve their own metadata.
 
@@ -34,6 +37,10 @@ Resource defaults chosen for initial implementation (configurable policy, not fo
 
 Writer uses one temporary sibling file, finalizes manifest/footer, publishes without replacing existing destination; source size/time checks and real progress/cancellation. Reader uses same open source, checks bounds before payload access, supports individual streaming and region-based reading; extraction to absent destination via sibling staging, validate size/hash, apply directories last, report errors/cleanup. Writer implemented and accepted in B on Windows and Ubuntu (2026-11-25); Reader and extraction implemented and accepted in C on Windows and Ubuntu (2026-11-25). Append/edit/compact not in this profile. SFX packaging and platform code signing outside Archive.
 
-Writer defaults: Zlib level 6 (0–9 configurable), 1 MiB read buffer, basic FileSystem stat metadata; per-file compression override, full metadata opt-in. Source size/mtime and read count checked before/after; no filesystem snapshot guarantee. No output until successful no-replace sibling publication; failure or cancellation closes writer, cleanup failure includes staging path. Progress counts bytes read/processed from source; archive total unknown until finish. No changes to wire layout.
+Writer defaults: Zstd level 3 (1–19 configurable), Zlib level 6 (0–9 configurable) as alternative, 1 MiB read buffer, basic FileSystem stat metadata; per-file compression override, full metadata opt-in. Source size/mtime and read count checked before/after; no filesystem snapshot guarantee. No output until successful no-replace sibling publication; failure or cancellation closes writer, cleanup failure includes staging path. Progress counts bytes read/processed from source; archive total unknown until finish. No changes to wire layout.
 
 Reader uses a bounded owned source, validates manifest on open, verifies each payload on demand. Zlib must reach StreamEnd, consume exactly storedSize and produce exactly originalSize; no trailing compressed bytes. SHA-256 checked before success. Entry streaming to external sinks is provisional until success; staged extraction publishes only after verification and requested metadata success. Target aliases checked with exclusive native creation, Windows device names and trailing space/dot rejected. Metadata reports are at application time; caller may defer metadata entirely. No wire layout changes.
+
+## E revision (unreleased, incompatible with A–D artifacts)
+
+Header stays 16 bytes/version 3; new distinct footer magic rejects older unpublished footer. Manifest remains last, stored as None/Zlib/Zstd, defaults Zstd. Both stored and original lengths independently bounded by max_manifest_bytes before allocation; exact original JSON digest and length validated after decode. None requires equal lengths. Exactly one full compression stream, no trailing or concatenated frames, no external dictionaries or skippable Zstd frames. Zstd decoder window capped at 128 MiB; supported writer levels 1–19. File payloads stay independent and bounded. No solid compression, encryption, multithreading or split format changes in E. Buffered extraction is opt-in pending measurements; PerFile remains previous default. Integrity/publication distinct from power-loss durability. Do not use pre-E generated RVA files with E; regenerate cross-OS fixtures. Runtime acceptance pending.

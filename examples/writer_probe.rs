@@ -33,7 +33,7 @@ fn inspect(path: &Path, source: &Path) -> ArchiveManifest {
     for entry in &manifest.entries {
         if let EntryKind::File { payload } = &entry.entry {
             let relative = entry.path.to_relative().unwrap();
-            let original = if relative == Path::new("selected.txt") {
+            let original = if relative == Path::new("selected.txt") || relative == Path::new("selected-zlib.txt") {
                 fs::read(source.join("tree").join("small.txt")).unwrap()
             } else { fs::read(source.join(&relative)).unwrap() };
             file.seek(SeekFrom::Start(payload.offset)).unwrap();
@@ -82,12 +82,13 @@ fn main() {
     writer.add_directory(&tree, rel("tree"), true).unwrap();
     writer.add_directory(&source.join("nonrecursive"), rel("nonrecursive"), false).unwrap();
     writer.add_file_with_compression(&tree.join("small.txt"), rel("selected.txt"), Compression::None).unwrap();
+    writer.add_file_with_compression(&tree.join("small.txt"), rel("selected-zlib.txt"), Compression::Zlib).unwrap();
     assert!(!archive.exists());
     let result = writer.finish().unwrap();
-    assert_eq!(result.entry_count, 7);
+    assert_eq!(result.entry_count, 8);
     assert_eq!(result.archive_bytes, fs::metadata(&archive).unwrap().len());
     let manifest = inspect(&archive, &source);
-    assert_eq!(manifest.entries.len(), 7);
+    assert_eq!(manifest.entries.len(), 8);
     assert!(manifest.entries.iter().any(|e| e.path == rel("tree/empty-dir") && matches!(&e.entry, EntryKind::Directory)));
     assert!(!manifest.entries.iter().any(|e| e.path == rel("nonrecursive/not-selected.txt")));
     assert!(manifest.entries.iter().any(|e| e.path == rel("selected.txt") && matches!(&e.entry, EntryKind::File { payload } if payload.compression == Compression::None)));
@@ -103,7 +104,7 @@ fn main() {
     assert!(events.iter().filter(|e| e.phase == WriterPhase::Writing && e.path.as_ref() == Some(&rel("tree/large.bin"))).count() >= 3);
     drop(events);
     no_stage(&out);
-    println!("PASS: streaming RVA writer, zstd/none, full metadata, recursive/nonrecursive/empty entries and payload SHA-256");
+    println!("PASS: streaming RVA writer, zstd/zlib/none, full metadata, recursive/nonrecursive/empty entries and payload SHA-256");
 
     let cancelled = out.join("cancelled.rva");
     let token = CancellationToken::new();

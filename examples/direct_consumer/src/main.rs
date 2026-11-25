@@ -1,10 +1,10 @@
 //! Independent Cargo consumer for ARCHIVE-RUST-01 / D.
 use remvibe_archive::{
     ArchivePath, ArchiveReader, ArchiveWriter, Compression, EntryKind, ExtractOptions,
-    MetadataCapture, MetadataPolicy, MetadataRequirement, PathComponent, ReaderOptions, WriterOptions, ExtractionSync,
+    MetadataCapture, MetadataPolicy, MetadataRequirement, PathComponent, ReaderOptions, WriterOptions, ExtractionSync, Footer, FOOTER_LEN,
 };
 use std::{
-    ffi::{OsStr, OsString}, fs::{self, File, FileTimes}, path::{Path, PathBuf},
+    ffi::{OsStr, OsString}, fs::{self, File, FileTimes}, io::{Read, Seek, SeekFrom}, path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -212,6 +212,13 @@ fn benchmark(parent: &Path) -> Result<()> {
             writer.add_directory(&source, rel("files"), true)?;
             let written = writer.finish()?;
             let pack = start.elapsed();
+            let mut footer_file = File::open(&archive)?;
+            footer_file.seek(SeekFrom::End(-(FOOTER_LEN as i64)))?;
+            let mut footer_bytes = [0; FOOTER_LEN];
+            footer_file.read_exact(&mut footer_bytes)?;
+            let footer = Footer::decode(&footer_bytes)?;
+            drop(footer_file);
+            println!("MANIFEST files={count} compression={compression:?} codec={:?} original_bytes={} stored_bytes={}", footer.manifest_compression, footer.manifest_original_length, footer.manifest_length);
             for sync in [ExtractionSync::PerFile, ExtractionSync::Buffered] {
             let target = fixture.0.join(format!("{count}-{compression:?}-{sync:?}-restored"));
             let start = Instant::now();

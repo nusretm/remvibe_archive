@@ -15,7 +15,7 @@ Checkpoint A accepted and closed on 2026-11-25: envelope and manifest encoding/d
 
 ## Writer (Checkpoint B)
 
-Use absolute source/destination paths and explicit relative ArchivePath values. ArchiveWriter::new, add_file, add_file_with_compression, add_directory (recursive or entry only), finish or abort. WriterOptions defaults to Zlib level 6, 1 MiB buffer and basic FileSystem metadata; full metadata is opt-in. Progress callback and thread-safe CancellationToken are available. Output is published only at finish, without replacing a destination. Any add/finish error aborts staging. Run cargo run --example writer_probe for focused acceptance.
+Use absolute source/destination paths and explicit relative ArchivePath values. ArchiveWriter::new, add_file, add_file_with_compression, add_directory (recursive or entry only), finish or abort. WriterOptions defaults to Zstd level 3 for files and manifest (Zlib level 6 and None supported), 1 MiB buffer and basic FileSystem metadata; full metadata is opt-in. Progress callback and thread-safe CancellationToken are available. Output is published only at finish, without replacing a destination. Any add/finish error aborts staging. Run cargo run --example writer_probe for focused acceptance.
 
 ## Reader (Checkpoint C)
 
@@ -24,3 +24,7 @@ ArchiveReader::open(path, ReaderOptions), open_region(path, offset, length, opti
 ## Acceptance (Checkpoint D)
 
 Independent package examples/direct_consumer depends only on remvibe_archive via Cargo path. Run `cargo run --locked --release --manifest-path examples/direct_consumer/Cargo.toml -- native`, `-- produce <archive>`, `-- consume <archive> <other-os>` and `-- bench [existing-work-dir]`. The portable archive must actually be exchanged across OSs. Benchmark uses 1,000/10,000 files of 4 KiB each, half repeated and half deterministic pseudorandom bytes, Zlib/None, default metadata; measures writer including publication and reader open/extraction including metadata and publication, excludes fixture creation and external byte comparisons. Results are local machine measurements, not a speed guarantee. See continuity for acceptance details.
+
+## Checkpoint E — Compression and performance (in progress)
+
+Unreleased RVA V3 footer revised to 72 bytes, distinct magic RVA3CMP, both stored and original manifest size, codec and SHA-256 of original JSON. Old A–D development artifacts are incompatible and must be regenerated. Default Zstd level 3, optional Zlib/None for payload and manifest independently; zlib_level and zstd_level control respective codecs. Bundled C Zstd compiled through Cargo, static codec linkage intended (requires native compiler at build time; deployment linkage acceptance later). ExtractionSync::PerFile remains default; Buffered does not force each file to stable storage, preserves staging/integrity/cancellation semantics but not equivalent durability after power loss. Benchmark both before deciding default. Root and consumer lockfiles must be re-resolved. Runtime pending. Split Archive remains F, not started.

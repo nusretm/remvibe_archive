@@ -54,10 +54,31 @@ fn main() {
     assert_eq!(ArchiveManifest::decode(&bytes, footer, region, &limits).unwrap(), manifest);
     let mut bad = bytes.clone(); bad[0] ^= 1;
     assert!(ArchiveManifest::decode(&bad, footer, region, &limits).is_err());
+    for compression in [Compression::Zlib, Compression::Zstd] {
+        let (stored, footer) = manifest.encode_with_compression(19, &limits, compression, 6, 3).unwrap();
+        let len = 19 + stored.len() as u64 + FOOTER_LEN as u64;
+        let region = ArchiveRegion::new(0, len, len).unwrap();
+        assert_eq!(ArchiveManifest::decode(&stored, footer, region, &limits).unwrap(), manifest);
+        assert_eq!(footer.manifest_original_length, bytes.len() as u64);
+        let mut trailing = stored.clone();
+        trailing.push(0);
+        let changed = Footer { manifest_length: footer.manifest_length + 1, ..footer };
+        let region = ArchiveRegion::new(0, len + 1, len + 1).unwrap();
+        assert!(ArchiveManifest::decode(&trailing, changed, region, &limits).is_err());
+        let mut truncated = stored.clone();
+        truncated.pop();
+        let changed = Footer { manifest_length: footer.manifest_length - 1, ..footer };
+        let region = ArchiveRegion::new(0, len - 1, len - 1).unwrap();
+        assert!(ArchiveManifest::decode(&truncated, changed, region, &limits).is_err());
+        let region = ArchiveRegion::new(0, len, len).unwrap();
+        assert!(ArchiveManifest::decode(&stored, Footer { manifest_original_length: 1, ..footer }, region, &limits).is_err());
+        let limit = ManifestLimits { max_manifest_bytes: footer.manifest_original_length - 1, ..limits };
+        assert!(limit.manifest_range(footer, region).is_err());
+    }
     let mut duplicate = manifest.clone(); duplicate.entries.push(manifest.entries[0].clone());
     assert!(duplicate.validate(19, &limits).is_err());
     assert!(manifest.validate(20, &limits).is_err());
     let limited = ManifestLimits { max_manifest_bytes: 1, ..limits };
     assert!(limited.manifest_range(footer, region).is_err());
-    println!("PASS: RVA manifest, native names, metadata and validation probe");
+    println!("PASS: RVA manifest, native names, metadata, compressed manifest bounds and validation probe");
 }
