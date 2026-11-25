@@ -92,7 +92,7 @@ class ArchiveOperation<T> {
       port = receiver;
       await Isolate.spawn(
         _nativeReceiver, (_library, handle, receiver.sendPort, operation,
-          decodeInReceiver ? decode as Object? Function(Object?) : null),
+          decodeInReceiver ? decode : null),
         onError: receiver.sendPort, onExit: receiver.sendPort,
       );
       await for (final message in receiver) {

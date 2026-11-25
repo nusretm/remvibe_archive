@@ -214,6 +214,7 @@ class ArchiveProgress {
   bool get isReader => outputBytes != null;
   BigInt get processedBytes => outputBytes ?? _sourceBytesRead!;
   /// Writer-only cumulative source bytes; use outputBytes for Reader events.
+  /// Use processedBytes for a shared Writer/Reader progress handler.
   BigInt get sourceBytesRead => _sourceBytesRead ??
       (throw StateError('Reader progress has outputBytes, not sourceBytesRead'));
   ArchiveProgress.fromJson(Object? value) : this._decode(jsonObject(value));
@@ -507,7 +508,7 @@ class ArchiveMetadataPolicy {
       ownership, windowsAcl, windowsAttributes, readonly;
   final bool allowPrivilegedMode;
 
-  /// Defaults mirror the Rust core ArchiveMetadataPolicy::default().
+  /// Defaults mirror the Rust core MetadataPolicy::default().
   const ArchiveMetadataPolicy({
     this.modifiedTime = ArchiveMetadataRequirement.ifSupported,
     this.accessedTime = ArchiveMetadataRequirement.ignore,
